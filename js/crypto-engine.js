@@ -7,7 +7,7 @@
  * - Persists one-time setup directly to workspace disk or GitHub repository
  */
 
-import { GoogleDriveClient } from './gdrive-engine.js?v=2';
+import { GoogleDriveClient } from './gdrive-engine.js?v=3';
 
 const MAGIC = [0x89, 0x56, 0x4c, 0x54]; // \x89VLT
 const MASK_LEN = 32;

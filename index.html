@@ -6,9 +6,9 @@
   <meta name="theme-color" content="#07090f" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>CipherStream — Encrypted Private Video Vault</title>
+  <title>CipherStream</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230d111c'/%3E%3Cpath d='M20 28v-5a12 12 0 0 1 24 0v5' fill='none' stroke='%2338bdf8' stroke-width='4.5' stroke-linecap='round'/%3E%3Crect x='14' y='28' width='36' height='24' rx='7' fill='%231e293b' stroke='%2338bdf8' stroke-width='3'/%3E%3Cpolygon points='29,35 29,45 38,40' fill='%2338bdf8'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="./css/styles.css?v=2" />
+  <link rel="stylesheet" href="./css/styles.css?v=3" />
 </head>
 <body>
   <div class="ambient-bg" aria-hidden="true">
@@ -19,13 +19,8 @@
   <!-- ================= PASSKEY LOCK GATE ================= -->
   <main id="lockScreen" class="lock-screen">
     <section id="lockCard" class="lock-card" aria-labelledby="lockHeading">
-      <div class="lock-badge">
-        <span class="pulse-dot"></span>
-        <span>ZERO-KNOWLEDGE ENCRYPTED VAULT</span>
-      </div>
-
       <div class="lock-emblem" aria-hidden="true">
-        <svg viewBox="0 0 48 48" width="44" height="44" fill="none">
+        <svg viewBox="0 0 48 48" width="42" height="42" fill="none">
           <path d="M15 21v-5a9 9 0 0 1 18 0v5" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
           <rect x="10" y="21" width="28" height="20" rx="6" fill="rgba(56,189,248,0.12)" stroke="currentColor" stroke-width="2.6"/>
           <polygon points="21.5,27 21.5,35 28.5,31" fill="currentColor"/>
@@ -33,9 +28,6 @@
       </div>
 
       <h1 id="lockHeading" class="lock-title">CipherStream</h1>
-      <p class="lock-desc">
-        Enter your private security passkey to decrypt the index and restore obfuscated GitHub blobs into playable MP4 streams in RAM.
-      </p>
 
       <form id="lockForm" class="lock-form" autocomplete="off">
         <div class="passkey-field-wrap">
@@ -43,11 +35,11 @@
             id="passkeyInput"
             type="password"
             class="passkey-input"
-            placeholder="Enter Security Passkey"
+            placeholder="Passkey"
             autocomplete="off"
             autocapitalize="off"
             spellcheck="false"
-            aria-label="Security Passkey"
+            aria-label="Passkey"
           />
           <button
             type="button"
@@ -66,9 +58,9 @@
         <div class="lock-options-row">
           <label class="checkbox-label">
             <input type="checkbox" id="rememberSessionChk" checked />
-            <span>Keep unlocked in this tab</span>
+            <span>Remember session</span>
           </label>
-          <button type="button" id="keypadToggleBtn" class="link-btn">Touch Keypad</button>
+          <button type="button" id="keypadToggleBtn" class="link-btn">Keypad</button>
         </div>
 
         <div id="quickKeypad" class="quick-keypad" hidden>
@@ -93,13 +85,9 @@
             <rect x="3" y="11" width="18" height="11" rx="2"/>
             <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
           </svg>
-          <span id="unlockBtnText">Unlock Vault</span>
+          <span id="unlockBtnText">Unlock</span>
         </button>
       </form>
-
-      <div class="lock-footer">
-        <span id="lockVaultStatus">Scanning encrypted vault index...</span>
-      </div>
     </section>
   </main>
 
@@ -116,7 +104,7 @@
           </div>
           <div>
             <div class="brand-name">CipherStream</div>
-            <div id="vaultStatsPill" class="brand-stats">Decrypted in RAM</div>
+            <div id="vaultStatsPill" class="brand-stats"></div>
           </div>
         </div>
 
@@ -128,32 +116,20 @@
             id="searchInput"
             type="search"
             class="search-input"
-            placeholder="Search videos or grouped series..."
+            placeholder="Search videos..."
             aria-label="Search videos"
           />
           <button type="button" id="clearSearchBtn" class="clear-search-btn" hidden aria-label="Clear search">✕</button>
         </div>
 
         <div class="topbar-actions">
-          <button type="button" id="syncDriveBtn" class="ghost-btn" hidden title="Refresh live videos from Google Drive">
+          <button type="button" id="syncDriveBtn" class="ghost-btn" hidden title="Refresh videos">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 12a9 9 0 0 0-15.5-6.36L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15.5 6.36L21 16"/><path d="M21 21v-5h-5"/>
             </svg>
-            <span class="hide-xs">Sync</span>
+            <span class="hide-xs">Refresh</span>
           </button>
-          <button type="button" id="gdriveBtn" class="drive-connect-btn" title="Connect your Google Drive videos folder">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>
-            </svg>
-            <span id="gdriveBtnLabel" class="hide-xs">Connect Drive</span>
-          </button>
-          <button type="button" id="inspectorBtn" class="ghost-btn" title="View stream mapping">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
-            </svg>
-            <span class="hide-xs">Stream Map</span>
-          </button>
-          <button type="button" id="lockVaultBtn" class="lock-action-btn" title="Wipe keys from RAM & lock">
+          <button type="button" id="lockVaultBtn" class="lock-action-btn" title="Lock">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2">
               <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
             </svg>
@@ -171,24 +147,19 @@
             All <span id="countAll" class="tab-count">0</span>
           </button>
           <button type="button" class="filter-tab" data-filter="groups">
-            Multi-Part Groups <span id="countGroups" class="tab-count">0</span>
+            Series <span id="countGroups" class="tab-count">0</span>
           </button>
           <button type="button" class="filter-tab" data-filter="singles">
-            Single Videos <span id="countSingles" class="tab-count">0</span>
+            Singles <span id="countSingles" class="tab-count">0</span>
           </button>
-        </div>
-
-        <div class="cipher-status-chip">
-          <span class="mp4-live-dot"></span>
-          <span id="sourceEngineChipText">Live RAM Blob → MP4 Engine</span>
         </div>
       </div>
 
       <div id="galleryGrid" class="gallery-grid"></div>
 
       <div id="emptyState" class="empty-state" hidden>
-        <p class="empty-title">No matching videos found</p>
-        <p class="empty-sub">Try clearing your search filter or upload new <code>.mp4</code> files to <code>assets/videos/</code> in GitHub.</p>
+        <p class="empty-title">No videos found</p>
+        <p class="empty-sub">Try clearing your search or switching filters.</p>
       </div>
     </main>
 
@@ -199,7 +170,7 @@
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
             <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
           </svg>
-          <span>Back to Library</span>
+          <span>Back</span>
         </button>
 
         <div class="watch-heading-box">
@@ -208,13 +179,13 @@
         </div>
 
         <!-- Shown automatically whenever a multi-part group (_00, _01, ...) is opened -->
-        <div id="watchModeToggle" class="mode-switch" role="group" aria-label="Multi-part viewing mode" hidden>
+        <div id="watchModeToggle" class="mode-switch" role="group" aria-label="Viewing mode" hidden>
           <button type="button" id="modePlaylistBtn" class="mode-btn is-active">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.1">
               <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
               <circle cx="4" cy="6" r="1.3" fill="currentColor"/><circle cx="4" cy="12" r="1.3" fill="currentColor"/><circle cx="4" cy="18" r="1.3" fill="currentColor"/>
             </svg>
-            <span>Playlist Player</span>
+            <span>Playlist</span>
           </button>
           <button type="button" id="modeTogetherBtn" class="mode-btn">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.1">
@@ -225,17 +196,17 @@
         </div>
       </div>
 
-      <!-- MODE 1: Normal Streaming Playlist / Single Theater Layout -->
+      <!-- MODE 1: Playlist / Single Theater Layout -->
       <div id="playlistLayout" class="playlist-layout">
         <div class="theater-main-col">
           <div id="mainPlayerMount" class="main-player-mount"></div>
           <div id="activeMetaBar" class="active-meta-bar"></div>
         </div>
 
-        <aside id="playlistSidebar" class="playlist-sidebar" aria-label="Grouped video parts">
+        <aside id="playlistSidebar" class="playlist-sidebar" aria-label="Parts">
           <div class="sidebar-head">
             <div>
-              <h3 class="sidebar-title">Grouped Parts</h3>
+              <h3 class="sidebar-title">Parts</h3>
               <span id="partsCountBadge" class="sidebar-sub">2 Parts</span>
             </div>
             <button type="button" id="sidebarLoopBtn" class="sidebar-loop-pill is-active">
@@ -246,13 +217,12 @@
         </aside>
       </div>
 
-      <!-- MODE 2: Together View (Watch _00, _01, ... side-by-side / stacked simultaneously!) -->
+      <!-- MODE 2: Together View (Watch _00, _01, ... side-by-side simultaneously) -->
       <div id="togetherLayout" class="together-layout" hidden>
         <div class="sync-master-bar">
           <div class="sync-label">
             <span class="mp4-live-dot"></span>
-            <strong>Multi-Part Together View</strong>
-            <span class="hide-sm">— Watch &amp; compare all parts simultaneously</span>
+            <strong>Together View</strong>
           </div>
           <div class="sync-controls">
             <button type="button" id="syncPlayAllBtn" class="sync-btn sync-btn-primary">
@@ -280,151 +250,12 @@
 
       <!-- More Videos -->
       <div class="up-next-section">
-        <h3 class="section-label">More in Your Vault</h3>
+        <h3 class="section-label">More Videos</h3>
         <div id="upNextGrid" class="gallery-grid"></div>
       </div>
     </section>
   </div>
 
-  <!-- ================= VAULT BLOB INSPECTOR MODAL ================= -->
-  <div id="inspectorModal" class="modal-backdrop" hidden>
-    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="inspectorTitle">
-      <div class="modal-header">
-        <div>
-          <h2 id="inspectorTitle" class="modal-title">Encrypted GitHub Blob → MP4 Map</h2>
-          <p class="modal-sub">
-            On GitHub, your videos have random filenames &amp; non-video extensions with zero thumbnails. Inside this unlocked session, they transform back to playable <code>.mp4</code> streams.
-          </p>
-        </div>
-        <button type="button" id="closeInspectorBtn" class="modal-close-btn" aria-label="Close">✕</button>
-      </div>
-
-      <div class="workflow-tip">
-        <strong>How to upload new videos:</strong> Drop any <code>.mp4</code> files into <code>assets/videos/</code> on GitHub (name multi-part sets like <code>something_00.mp4</code>, <code>something_01.mp4</code>). GitHub Actions automatically runs <code>transform-videos.yml</code>, converts them into random encrypted files, deletes the raw <code>.mp4</code>s, and publishes them here!
-      </div>
-
-      <div class="table-scroll">
-        <table class="inspector-table">
-          <thead>
-            <tr>
-              <th>Source / GitHub Blob</th>
-              <th>Restored Inside Website</th>
-              <th>Grouping</th>
-              <th>Stream Info</th>
-            </tr>
-          </thead>
-          <tbody id="inspectorTableBody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- ================= CONNECT GOOGLE DRIVE MODAL ================= -->
-  <div id="gdriveModal" class="modal-backdrop" hidden>
-    <div class="modal-panel gdrive-modal-panel" role="dialog" aria-modal="true" aria-labelledby="gdriveModalTitle">
-      <div class="modal-header">
-        <div>
-          <h2 id="gdriveModalTitle" class="modal-title">Connect Google Drive "videos" Folder</h2>
-          <p class="modal-sub">
-            Connect any separate Google Account's <code>videos</code> folder. Your Folder ID &amp; credentials are <strong>AES-256-GCM encrypted</strong> inside <code>assets/core.vlt</code> behind your passkey — nobody on GitHub can see them.
-          </p>
-        </div>
-        <button type="button" id="closeGdriveBtn" class="modal-close-btn" aria-label="Close">✕</button>
-      </div>
-
-      <div class="gdrive-auth-tabs" role="tablist">
-        <button type="button" id="tabApiKeyBtn" class="gdrive-tab is-active" data-gd-mode="apikey">
-          Option 1: Folder Link + API Key (Easiest)
-        </button>
-        <button type="button" id="tabServiceAccBtn" class="gdrive-tab" data-gd-mode="service_account">
-          Option 2: Private Folder + Service Account JSON
-        </button>
-      </div>
-
-      <form id="gdriveForm" class="gdrive-form" autocomplete="off">
-        <div id="gdriveInstructionsApiKey" class="workflow-tip">
-          <strong>2-Minute Setup on Your Video Google Account:</strong><br/>
-          1. In that Google Drive account, right-click your <code>videos</code> folder → <strong>Share</strong> → set General Access to <strong>Anyone with the link (Viewer)</strong> → copy link.<br/>
-          2. Open <code>console.cloud.google.com</code> → enable <strong>Google Drive API</strong> → <strong>Credentials → Create Credentials → API Key</strong> → paste below.
-        </div>
-
-        <div id="gdriveInstructionsSa" class="workflow-tip" hidden>
-          <strong>100% Restricted Private Folder Setup:</strong><br/>
-          1. In <code>console.cloud.google.com</code> → enable <strong>Google Drive API</strong> → <strong>Credentials → Create Credentials → Service Account</strong> → <strong>Keys → Add Key → Create new key (JSON)</strong>.<br/>
-          2. In Google Drive, keep your <code>videos</code> folder <strong>Restricted</strong> and share it only with that <code><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="37191919771919195e565a1950445245415e5452565454584259431954585a">[email&#160;protected]</a></code> email (Viewer).
-        </div>
-
-        <label class="field-label">
-          <span>Google Drive <code>videos</code> Folder Link or Folder ID</span>
-          <input
-            id="gdFolderInput"
-            type="text"
-            class="gd-input"
-            placeholder="https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz..."
-            required
-          />
-        </label>
-
-        <div id="gdApiKeyGroup">
-          <label class="field-label">
-            <span>Google Drive API Key</span>
-            <input
-              id="gdApiKeyInput"
-              type="password"
-              class="gd-input"
-              placeholder="AIzaSy..."
-            />
-          </label>
-        </div>
-
-        <div id="gdServiceAccGroup" hidden>
-          <label class="field-label">
-            <span>Service Account Key JSON (paste contents or load <code>.json</code> file)</span>
-            <input type="file" id="gdSaFilePicker" accept=".json,application/json" class="gd-file-input" />
-            <textarea
-              id="gdSaJsonInput"
-              class="gd-textarea"
-              rows="4"
-              placeholder='{"type":"service_account","client_email":"...","private_key":"-----BEGIN PRIVATE KEY-----..."}'
-            ></textarea>
-          </label>
-        </div>
-
-        <label class="checkbox-label gd-keep-local">
-          <input type="checkbox" id="gdKeepLocalChk" />
-          <span>Also keep existing local sample videos from <code>assets/videos/</code> (uncheck to show ONLY your Google Drive videos)</span>
-        </label>
-
-        <!-- Shown ONLY on live GitHub Pages (when local workspace auto-save isn't present) -->
-        <div id="gdGithubSaveBox" class="gd-github-box" hidden>
-          <div class="gd-github-title">One-Time Permanent Save to GitHub Repo (So All Users See It Forever)</div>
-          <div class="gd-github-grid">
-            <label class="field-label">
-              <span>GitHub Repo (<code>owner/repo</code>)</span>
-              <input id="gdGhRepoInput" type="text" class="gd-input" placeholder="username/my-vault" />
-            </label>
-            <label class="field-label">
-              <span>Branch</span>
-              <input id="gdGhBranchInput" type="text" class="gd-input" value="main" />
-            </label>
-          </div>
-          <label class="field-label" style="margin-top:8px;">
-            <span>One-Time GitHub Personal Access Token (<code>Contents: Read &amp; Write</code> — never saved, used once to commit <code>assets/core.vlt</code>)</span>
-            <input id="gdGhTokenInput" type="password" class="gd-input" placeholder="github_pat_... or ghp_..." />
-          </label>
-        </div>
-
-        <div id="gdStatusBanner" class="gd-status-banner" hidden></div>
-
-        <div class="gd-actions-row">
-          <button type="submit" id="gdSealBtn" class="unlock-btn gd-submit-btn">
-            <span id="gdSealBtnText">Save Permanently for All Users</span>
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script type="module" src="./js/app.js?v=2"></script>
+  <script type="module" src="./js/app.js?v=3"></script>
 </body>
 </html>

@@ -2,11 +2,8 @@ import {
   fetchVaultManifest,
   VaultSession,
   InvalidPasskeyError,
-  checkLocalWritableServer,
-  inferGitHubRepoFromLocation,
-} from './crypto-engine.js?v=2';
-import { extractDriveFolderId } from './gdrive-engine.js?v=2';
-import { CipherPlayer, formatTime, formatBytes } from './player.js?v=2';
+} from './crypto-engine.js?v=3';
+import { CipherPlayer, formatTime, formatBytes } from './player.js?v=3';
 
 const SESSION_KEY = 'cv_session_passkey_v1';
 
@@ -14,16 +11,14 @@ class CipherVaultApp {
   constructor() {
     this.vaultManifest = null;
     this.session = new VaultSession();
-    this.localWritable = false;
 
     this.activeFilter = 'all'; // 'all' | 'groups' | 'singles'
     this.searchQuery = '';
-    this.gdSelectedMode = 'apikey'; // 'apikey' | 'service_account'
 
     // Watch state
     this.activeItem = null;
     this.activePartIdx = 0;
-    this.watchMode = 'playlist'; // 'playlist' | 'playlist' | 'together'
+    this.watchMode = 'playlist'; // 'playlist' | 'together'
     this.playlistLoopMode = 'all'; // 'all' | 'one' | 'off'
     this.singleLoopMode = 'one'; // 'one' | 'off'
     this.togetherLoopAll = true;
@@ -47,21 +42,16 @@ class CipherVaultApp {
     this.unlockBtn = document.getElementById('unlockBtn');
     this.unlockBtnText = document.getElementById('unlockBtnText');
     this.lockError = document.getElementById('lockError');
-    this.lockVaultStatus = document.getElementById('lockVaultStatus');
     this.keypadToggleBtn = document.getElementById('keypadToggleBtn');
     this.quickKeypad = document.getElementById('quickKeypad');
 
     // App Shell
     this.appShell = document.getElementById('appShell');
     this.statsPill = document.getElementById('vaultStatsPill');
-    this.sourceEngineChipText = document.getElementById('sourceEngineChipText');
     this.searchInput = document.getElementById('searchInput');
     this.clearSearchBtn = document.getElementById('clearSearchBtn');
     this.filterBtns = document.querySelectorAll('[data-filter]');
     this.lockVaultBtn = document.getElementById('lockVaultBtn');
-    this.inspectorBtn = document.getElementById('inspectorBtn');
-    this.gdriveBtn = document.getElementById('gdriveBtn');
-    this.gdriveBtnLabel = document.getElementById('gdriveBtnLabel');
     this.syncDriveBtn = document.getElementById('syncDriveBtn');
 
     // Views
@@ -99,64 +89,19 @@ class CipherVaultApp {
     this.syncLoopAllBtn = document.getElementById('syncLoopAllBtn');
     this.syncUnmuteAllBtn = document.getElementById('syncUnmuteAllBtn');
 
-    // Up next grid inside watch view
+    // More videos grid inside watch view
     this.upNextGrid = document.getElementById('upNextGrid');
-
-    // Vault Inspector Modal
-    this.inspectorModal = document.getElementById('inspectorModal');
-    this.closeInspectorBtn = document.getElementById('closeInspectorBtn');
-    this.inspectorTableBody = document.getElementById('inspectorTableBody');
-
-    // Google Drive Connect Modal
-    this.gdriveModal = document.getElementById('gdriveModal');
-    this.closeGdriveBtn = document.getElementById('closeGdriveBtn');
-    this.tabApiKeyBtn = document.getElementById('tabApiKeyBtn');
-    this.tabServiceAccBtn = document.getElementById('tabServiceAccBtn');
-    this.gdriveInstructionsApiKey = document.getElementById('gdriveInstructionsApiKey');
-    this.gdriveInstructionsSa = document.getElementById('gdriveInstructionsSa');
-    this.gdriveForm = document.getElementById('gdriveForm');
-    this.gdFolderInput = document.getElementById('gdFolderInput');
-    this.gdApiKeyGroup = document.getElementById('gdApiKeyGroup');
-    this.gdApiKeyInput = document.getElementById('gdApiKeyInput');
-    this.gdServiceAccGroup = document.getElementById('gdServiceAccGroup');
-    this.gdSaFilePicker = document.getElementById('gdSaFilePicker');
-    this.gdSaJsonInput = document.getElementById('gdSaJsonInput');
-    this.gdKeepLocalChk = document.getElementById('gdKeepLocalChk');
-    this.gdGithubSaveBox = document.getElementById('gdGithubSaveBox');
-    this.gdGhRepoInput = document.getElementById('gdGhRepoInput');
-    this.gdGhBranchInput = document.getElementById('gdGhBranchInput');
-    this.gdGhTokenInput = document.getElementById('gdGhTokenInput');
-    this.gdStatusBanner = document.getElementById('gdStatusBanner');
-    this.gdSealBtn = document.getElementById('gdSealBtn');
-    this.gdSealBtnText = document.getElementById('gdSealBtnText');
   }
 
   async boot() {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
-    }
-
-    this.localWritable = await checkLocalWritableServer();
-    const inferredRepo = inferGitHubRepoFromLocation();
-    if (inferredRepo && this.gdGhRepoInput) {
-      this.gdGhRepoInput.value = inferredRepo;
+      navigator.serviceWorker
+        .register('./sw.js?v=2', { scope: './', updateViaCache: 'none' })
+        .catch(() => {});
     }
 
     try {
       this.vaultManifest = await fetchVaultManifest();
-      const localCount = (this.vaultManifest.entries || []).length;
-      const hasDrive = Boolean(
-        this.vaultManifest.gdrive?.m || this.vaultManifest.gdrive?.sealed
-      );
-
-      if (hasDrive && localCount === 0) {
-        this.lockVaultStatus.textContent =
-          'Encrypted Google Drive connector sealed in assets/core.vlt';
-      } else if (hasDrive) {
-        this.lockVaultStatus.textContent = `Encrypted Google Drive + ${localCount} local blobs sealed`;
-      } else {
-        this.lockVaultStatus.textContent = `${localCount} encrypted stream blobs sealed in assets/videos/`;
-      }
 
       const savedPass = sessionStorage.getItem(SESSION_KEY);
       if (savedPass) {
@@ -167,7 +112,6 @@ class CipherVaultApp {
         setTimeout(() => this.passkeyInput.focus(), 100);
       }
     } catch (err) {
-      this.lockVaultStatus.textContent = 'Vault offline or missing assets/core.vlt';
       this.showLockError(err.message);
     }
   }
@@ -187,7 +131,7 @@ class CipherVaultApp {
         this.keypadToggleBtn.textContent = 'Hide Keypad';
       } else {
         this.quickKeypad.setAttribute('hidden', '');
-        this.keypadToggleBtn.textContent = 'Touch Keypad';
+        this.keypadToggleBtn.textContent = 'Keypad';
       }
     });
 
@@ -214,7 +158,7 @@ class CipherVaultApp {
       e.preventDefault();
       const passkey = this.passkeyInput.value.trim();
       if (!passkey) {
-        this.showLockError('Enter your security passkey to decrypt the vault.');
+        this.showLockError('Enter passkey.');
         return;
       }
       await this.attemptUnlock(passkey, false);
@@ -252,55 +196,7 @@ class CipherVaultApp {
       this.lockVault();
     });
 
-    // Inspector modal
-    this.inspectorBtn.addEventListener('click', () => {
-      this.renderInspectorModal();
-      this.inspectorModal.hidden = false;
-    });
-
-    this.closeInspectorBtn.addEventListener('click', () => {
-      this.inspectorModal.hidden = true;
-    });
-
-    this.inspectorModal.addEventListener('click', (e) => {
-      if (e.target === this.inspectorModal) {
-        this.inspectorModal.hidden = true;
-      }
-    });
-
-    // Google Drive Modal & Live Sync
-    this.gdriveBtn.addEventListener('click', () => {
-      this.openGdriveModal();
-    });
-
-    this.closeGdriveBtn.addEventListener('click', () => {
-      this.gdriveModal.hidden = true;
-    });
-
-    this.gdriveModal.addEventListener('click', (e) => {
-      if (e.target === this.gdriveModal) {
-        this.gdriveModal.hidden = true;
-      }
-    });
-
-    this.tabApiKeyBtn.addEventListener('click', () => this.setGdriveTab('apikey'));
-    this.tabServiceAccBtn.addEventListener('click', () =>
-      this.setGdriveTab('service_account')
-    );
-
-    this.gdSaFilePicker.addEventListener('change', async (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      const text = await file.text();
-      this.gdSaJsonInput.value = text;
-    });
-
-    this.gdriveForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      await this.handleConnectAndSealGdrive();
-    });
-
-    this.syncDriveBtn.addEventListener('click', async () => {
+    this.syncDriveBtn?.addEventListener('click', async () => {
       await this.handleManualDriveSync();
     });
 
@@ -371,14 +267,6 @@ class CipherVaultApp {
 
     // Android hardware Back button / browser history integration
     window.addEventListener('popstate', () => {
-      if (!this.gdriveModal.hidden) {
-        this.gdriveModal.hidden = true;
-        return;
-      }
-      if (!this.inspectorModal.hidden) {
-        this.inspectorModal.hidden = true;
-        return;
-      }
       if (!this.watchSection.hidden) {
         this.closeWatchView(false);
       }
@@ -389,16 +277,6 @@ class CipherVaultApp {
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
         if (e.key === 'Escape') document.activeElement.blur();
-        return;
-      }
-
-      if (!this.gdriveModal.hidden && e.key === 'Escape') {
-        this.gdriveModal.hidden = true;
-        return;
-      }
-
-      if (!this.inspectorModal.hidden && e.key === 'Escape') {
-        this.inspectorModal.hidden = true;
         return;
       }
 
@@ -462,158 +340,15 @@ class CipherVaultApp {
     });
   }
 
-  setGdriveTab(mode) {
-    this.gdSelectedMode = mode;
-    const isApi = mode === 'apikey';
-    this.tabApiKeyBtn.classList.toggle('is-active', isApi);
-    this.tabServiceAccBtn.classList.toggle('is-active', !isApi);
-    this.gdriveInstructionsApiKey.hidden = !isApi;
-    this.gdriveInstructionsSa.hidden = isApi;
-    this.gdApiKeyGroup.hidden = !isApi;
-    this.gdServiceAccGroup.hidden = isApi;
-    this.gdStatusBanner.hidden = true;
-  }
-
-  openGdriveModal() {
-    this.gdStatusBanner.hidden = true;
-    // Show GitHub API direct-commit box ONLY when not running on a local writable workspace server
-    this.gdGithubSaveBox.hidden = this.localWritable;
-
-    if (this.session.driveConfig) {
-      const cfg = this.session.driveConfig;
-      this.gdFolderInput.value = cfg.folderId || '';
-      this.gdKeepLocalChk.checked = Boolean(cfg.includeLocalVault);
-      this.setGdriveTab(cfg.mode || 'apikey');
-      if (cfg.mode === 'apikey' && cfg.apiKey) {
-        this.gdApiKeyInput.value = cfg.apiKey;
-      }
-    }
-    this.gdriveModal.hidden = false;
-  }
-
-  showGdStatus(msg, isError = false) {
-    this.gdStatusBanner.innerHTML = msg;
-    this.gdStatusBanner.className = `gd-status-banner ${
-      isError ? 'is-error' : 'is-success'
-    }`;
-    this.gdStatusBanner.hidden = false;
-  }
-
-  async handleConnectAndSealGdrive() {
-    const folderId = extractDriveFolderId(this.gdFolderInput.value);
-    if (!folderId) {
-      this.showGdStatus('Please paste a valid Google Drive Folder Link or Folder ID.', true);
-      return;
-    }
-
-    let driveConfig;
-    if (this.gdSelectedMode === 'apikey') {
-      const apiKey = this.gdApiKeyInput.value.trim();
-      if (!apiKey) {
-        this.showGdStatus('Please enter your Google Drive API Key.', true);
-        return;
-      }
-      driveConfig = {
-        mode: 'apikey',
-        folderId,
-        apiKey,
-        includeLocalVault: this.gdKeepLocalChk.checked,
-      };
-    } else {
-      let saObj;
-      try {
-        saObj = JSON.parse(this.gdSaJsonInput.value.trim());
-      } catch {
-        this.showGdStatus('Invalid Service Account JSON format.', true);
-        return;
-      }
-      if (!saObj.client_email || !saObj.private_key) {
-        this.showGdStatus(
-          'Service Account JSON must include "client_email" and "private_key".',
-          true
-        );
-        return;
-      }
-      driveConfig = {
-        mode: 'service_account',
-        folderId,
-        clientEmail: saObj.client_email,
-        privateKeyPem: saObj.private_key,
-        tokenUri: saObj.token_uri || 'https://oauth2.googleapis.com/token',
-        includeLocalVault: this.gdKeepLocalChk.checked,
-      };
-    }
-
-    const ghRepo = this.gdGhRepoInput?.value.trim() || '';
-    const ghBranch = this.gdGhBranchInput?.value.trim() || 'main';
-    const ghToken = this.gdGhTokenInput?.value.trim() || '';
-
-    if (!this.localWritable && !ghToken) {
-      this.showGdStatus(
-        'Enter your GitHub Repo & One-Time Personal Access Token below so the website can commit <code>assets/core.vlt</code> directly to GitHub permanently for all users!',
-        true
-      );
-      return;
-    }
-
-    this.gdSealBtn.disabled = true;
-    this.gdSealBtnText.textContent = 'Encrypting & Saving Permanently...';
-    this.gdStatusBanner.hidden = true;
-
-    try {
-      const { updatedVault, videoCount, savedWhere } =
-        await this.session.connectAndPersistGoogleDrive(
-          this.vaultManifest,
-          driveConfig,
-          {
-            localWritable: this.localWritable,
-            githubRepo: ghRepo,
-            githubBranch: ghBranch,
-            githubToken: ghToken,
-          }
-        );
-
-      this.vaultManifest = updatedVault;
-      if (this.gdGhTokenInput) this.gdGhTokenInput.value = ''; // Wipe token from DOM immediately
-
-      this.updateCounts();
-      this.renderGallery();
-
-      if (savedWhere === 'workspace') {
-        this.showGdStatus(
-          `<strong>Saved Permanently! (${videoCount} Google Drive videos found)</strong><br/>` +
-            `<code>assets/core.vlt</code> in this workspace is now permanently encrypted &amp; bound to your Google Drive folder! Once pushed to GitHub Pages, <strong>every user on any phone or PC who logs in with your passkey will see these videos forever</strong> — you never need to enter the key again.`,
-          false
-        );
-      } else if (savedWhere === 'github') {
-        this.showGdStatus(
-          `<strong>Committed Permanently to GitHub! (${videoCount} Google Drive videos found)</strong><br/>` +
-            `<code>assets/core.vlt</code> was pushed directly to <code>${this.escapeHtml(
-              ghRepo
-            )}</code>. Within ~30s of GitHub Pages deploying, <strong>every user anywhere who logs in with your passkey will see your Google Drive videos forever!</strong>`,
-          false
-        );
-      }
-    } catch (err) {
-      this.showGdStatus(
-        `Error: ${this.escapeHtml(err.message || 'Check Folder permissions & key.')}`,
-        true
-      );
-    } finally {
-      this.gdSealBtn.disabled = false;
-      this.gdSealBtnText.textContent = 'Save Permanently for All Users';
-    }
-  }
-
   async handleManualDriveSync() {
-    if (!this.session.hasGoogleDrive()) return;
+    if (!this.session.hasGoogleDrive() || !this.syncDriveBtn) return;
     this.syncDriveBtn.disabled = true;
     try {
       await this.session.refreshGoogleDrive();
       this.updateCounts();
       this.renderGallery();
     } catch (err) {
-      alert(`Google Drive sync failed: ${err.message}`);
+      alert(`Refresh failed: ${err.message}`);
     } finally {
       this.syncDriveBtn.disabled = false;
     }
@@ -625,7 +360,7 @@ class CipherVaultApp {
     }
 
     this.unlockBtn.disabled = true;
-    this.unlockBtnText.textContent = 'Decrypting Vault...';
+    this.unlockBtnText.textContent = 'Unlocking...';
     this.hideLockError();
 
     try {
@@ -644,17 +379,17 @@ class CipherVaultApp {
         sessionStorage.removeItem(SESSION_KEY);
         this.passkeyInput.value = '';
       } else if (err instanceof InvalidPasskeyError) {
-        this.showLockError('Access denied — invalid passkey.');
+        this.showLockError('Invalid passkey.');
         this.lockCard.classList.remove('shake');
         void this.lockCard.offsetWidth;
         this.lockCard.classList.add('shake');
         this.passkeyInput.select();
       } else {
-        this.showLockError(err.message || 'Failed to unlock vault.');
+        this.showLockError(err.message || 'Failed to unlock.');
       }
     } finally {
       this.unlockBtn.disabled = false;
-      this.unlockBtnText.textContent = 'Unlock Vault';
+      this.unlockBtnText.textContent = 'Unlock';
     }
   }
 
@@ -676,8 +411,6 @@ class CipherVaultApp {
 
   lockVault() {
     this.closeWatchView(false);
-    this.inspectorModal.hidden = true;
-    this.gdriveModal.hidden = true;
     sessionStorage.removeItem(SESSION_KEY);
     this.session.lock();
     this.appShell.hidden = true;
@@ -694,15 +427,12 @@ class CipherVaultApp {
     this.countAll.textContent = String(all.length);
     this.countGroups.textContent = String(groups.length);
     this.countSingles.textContent = String(singles.length);
-    this.statsPill.textContent = `${all.length} Titles • ${this.session.rawEntriesCount} MP4 Streams`;
+    this.statsPill.textContent =
+      all.length === 1 ? '1 Title' : `${all.length} Titles`;
 
-    const hasDrive = this.session.hasGoogleDrive();
-    this.syncDriveBtn.hidden = !hasDrive;
-    this.gdriveBtn.classList.toggle('is-connected', hasDrive);
-    this.gdriveBtnLabel.textContent = hasDrive ? 'Drive Connected' : 'Connect Drive';
-    this.sourceEngineChipText.textContent = hasDrive
-      ? 'Live Google Drive → MP4 Engine'
-      : 'Live RAM Blob → MP4 Engine';
+    if (this.syncDriveBtn) {
+      this.syncDriveBtn.hidden = !this.session.hasGoogleDrive();
+    }
   }
 
   getFilteredCatalog() {
@@ -733,8 +463,13 @@ class CipherVaultApp {
       this.emptyState.hidden = false;
       if (this.session.driveError) {
         this.emptyState.querySelector('.empty-title').textContent =
-          'Google Drive Connection Error';
+          'Unable to load videos';
         this.emptyState.querySelector('.empty-sub').textContent = this.session.driveError;
+      } else {
+        this.emptyState.querySelector('.empty-title').textContent =
+          'No videos found';
+        this.emptyState.querySelector('.empty-sub').textContent =
+          'Try clearing your search or switching filters.';
       }
       return;
     }
@@ -754,15 +489,13 @@ class CipherVaultApp {
     article.setAttribute(
       'aria-label',
       item.isGroup
-        ? `${item.title}, ${item.partCount} parts, ${formatTime(item.totalDuration)}`
-        : `${item.title}, ${formatTime(item.totalDuration)}`
+        ? `${item.title}, ${item.partCount} parts`
+        : item.title
     );
 
-    const subtitleText = item.isGroup
-      ? `${item.parts[0].name} … ${item.parts[item.parts.length - 1].name}`
-      : `${item.parts[0].name} • ${item.width}×${item.height}`;
-
-    const isDrive = item.sourceType === 'gdrive';
+    const subMeta = item.isGroup
+      ? `${item.partCount} parts`
+      : item.folder || '';
 
     article.innerHTML = `
       ${item.isGroup ? `<div class="group-stack-layer layer-2"></div><div class="group-stack-layer layer-1"></div>` : ''}
@@ -772,21 +505,20 @@ class CipherVaultApp {
             ? `<img class="card-thumb-img" src="${item.coverPoster}" alt="${this.escapeHtml(
                 item.title
               )}" loading="lazy" referrerpolicy="no-referrer" />`
-            : `<div class="card-thumb-placeholder"><span>MP4</span></div>`
+            : `<div class="card-thumb-placeholder"><span>▶</span></div>`
         }
         <div class="card-gradient"></div>
 
-        <div class="card-badges-top">
-          ${
-            item.isGroup
-              ? `<span class="badge badge-parts">
+        ${
+          item.isGroup
+            ? `<div class="card-badges-top">
+                <span class="badge badge-parts">
                   <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.3"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
                   ${item.partCount} PARTS
-                 </span>`
-              : `<span class="badge badge-single">${isDrive ? 'DRIVE' : 'SINGLE'}</span>`
-          }
-          <span class="badge badge-mp4">MP4</span>
-        </div>
+                </span>
+              </div>`
+            : ''
+        }
 
         <div class="card-play-hover">
           <div class="card-play-circle">
@@ -794,31 +526,29 @@ class CipherVaultApp {
           </div>
         </div>
 
-        <div class="card-badges-bottom">
-          ${
-            item.isGroup
-              ? `<span class="card-together-hint">Playlist + Together View</span>`
-              : `<span>${formatBytes(item.totalSize)}</span>`
-          }
-          <span class="badge-duration">${formatTime(item.totalDuration)}</span>
-        </div>
+        ${
+          item.totalDuration > 0
+            ? `<div class="card-badges-bottom" style="justify-content:flex-end;">
+                <span class="badge-duration">${formatTime(item.totalDuration)}</span>
+              </div>`
+            : ''
+        }
       </div>
 
       <div class="card-body">
         <div class="card-title-row">
           <h3 class="card-title">${this.escapeHtml(item.title)}</h3>
         </div>
-        <p class="card-sub">${this.escapeHtml(subtitleText)}</p>
+        ${subMeta ? `<p class="card-sub">${this.escapeHtml(subMeta)}</p>` : ''}
       </div>
     `;
 
-    // Graceful thumbnail fallback if Drive hasn't generated a thumbnail yet
     const imgEl = article.querySelector('.card-thumb-img');
     if (imgEl) {
       imgEl.addEventListener('error', () => {
         const ph = document.createElement('div');
         ph.className = 'card-thumb-placeholder';
-        ph.innerHTML = '<span>MP4</span>';
+        ph.innerHTML = '<span>▶</span>';
         imgEl.replaceWith(ph);
       });
     }
@@ -853,15 +583,15 @@ class CipherVaultApp {
 
     this.watchTitle.textContent = item.title;
     if (item.isGroup) {
-      this.watchSubtitle.textContent = `${item.partCount} grouped parts • Total ${formatTime(
-        item.totalDuration
-      )} • ${formatBytes(item.totalSize)}`;
+      const durStr = item.totalDuration > 0 ? ` • ${formatTime(item.totalDuration)}` : '';
+      this.watchSubtitle.textContent = `${item.partCount} parts${durStr}`;
       this.watchModeToggle.hidden = false;
     } else {
       const p = item.parts[0];
-      this.watchSubtitle.textContent = `${p.name} • ${p.width}×${p.height} • ${formatBytes(
-        p.size
-      )}`;
+      const bits = [];
+      if (p.duration > 0) bits.push(formatTime(p.duration));
+      if (p.size > 0) bits.push(formatBytes(p.size));
+      this.watchSubtitle.textContent = bits.join(' • ');
       this.watchModeToggle.hidden = true;
     }
 
@@ -933,7 +663,7 @@ class CipherVaultApp {
   updateSidebarLoopLabel() {
     const map = {
       all: 'Loop All: ON',
-      one: 'Loop Current Part',
+      one: 'Loop Part',
       off: 'Loop: OFF',
     };
     this.sidebarLoopBtn.textContent = map[this.playlistLoopMode] || 'Loop All: ON';
@@ -961,28 +691,23 @@ class CipherVaultApp {
   }
 
   renderActiveMetaBar(part) {
-    const partBadge = this.activeItem.isGroup
-      ? `<span class="meta-pill meta-pill-accent">${this.escapeHtml(part.partLabel)} / ${
-          this.activeItem.partCount
-        }</span>`
-      : `<span class="meta-pill meta-pill-accent">Standalone MP4</span>`;
+    if (!this.activeItem.isGroup) {
+      this.activeMetaBar.hidden = true;
+      this.activeMetaBar.innerHTML = '';
+      return;
+    }
 
-    const originText =
-      part.sourceType === 'gdrive'
-        ? `Google Drive: <code>${this.escapeHtml(part.driveFileId.slice(0, 14))}…</code> → <code>.mp4</code>`
-        : `GitHub blob: <code>${this.escapeHtml(part.blobFile)}</code> → <code>.mp4</code>`;
+    this.activeMetaBar.hidden = false;
+    const details = [];
+    if (part.duration > 0) details.push(formatTime(part.duration));
+    if (part.size > 0) details.push(formatBytes(part.size));
 
     this.activeMetaBar.innerHTML = `
       <div class="active-meta-left">
-        ${partBadge}
-        <span class="meta-filename">${this.escapeHtml(part.name)}</span>
-        <span class="meta-dim">${part.width}×${part.height} • ${formatTime(part.duration)} • ${formatBytes(part.size)}</span>
-      </div>
-      <div class="active-meta-right">
-        <span class="meta-cipher-tag">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-          ${originText}
-        </span>
+        <span class="meta-pill meta-pill-accent">${this.escapeHtml(part.partLabel)} / ${
+      this.activeItem.partCount
+    }</span>
+        ${details.length ? `<span class="meta-dim">${details.join(' • ')}</span>` : ''}
       </div>
     `;
   }
@@ -998,9 +723,6 @@ class CipherVaultApp {
       btn.className = `part-row${idx === this.activePartIdx ? ' is-playing' : ''}`;
       btn.dataset.partIdx = String(idx);
 
-      const srcLabel =
-        part.sourceType === 'gdrive' ? 'Google Drive' : part.blobFile;
-
       btn.innerHTML = `
         <div class="part-thumb-box">
           ${
@@ -1008,9 +730,9 @@ class CipherVaultApp {
               ? `<img src="${part.poster}" alt="${this.escapeHtml(
                   part.partLabel
                 )}" referrerpolicy="no-referrer" />`
-              : `<div class="part-thumb-fallback">MP4</div>`
+              : `<div class="part-thumb-fallback">▶</div>`
           }
-          <span class="part-dur">${formatTime(part.duration)}</span>
+          ${part.duration > 0 ? `<span class="part-dur">${formatTime(part.duration)}</span>` : ''}
           <div class="part-eq" aria-hidden="true">
             <span></span><span></span><span></span>
           </div>
@@ -1018,10 +740,8 @@ class CipherVaultApp {
         <div class="part-info">
           <div class="part-label-row">
             <span class="part-num">${this.escapeHtml(part.partLabel)}</span>
-            <span class="part-mp4-tag">MP4</span>
           </div>
-          <div class="part-fname">${this.escapeHtml(part.name)}</div>
-          <div class="part-blob-sub">${this.escapeHtml(srcLabel)} • ${formatBytes(part.size)}</div>
+          ${part.size > 0 ? `<div class="part-blob-sub">${formatBytes(part.size)}</div>` : ''}
         </div>
       `;
 
@@ -1030,7 +750,7 @@ class CipherVaultApp {
         thumbImg.addEventListener('error', () => {
           const fb = document.createElement('div');
           fb.className = 'part-thumb-fallback';
-          fb.textContent = 'MP4';
+          fb.textContent = '▶';
           thumbImg.replaceWith(fb);
         });
       }
@@ -1068,16 +788,12 @@ class CipherVaultApp {
     item.parts.forEach((part, idx) => {
       const cell = document.createElement('div');
       cell.className = 'together-cell';
-      const tagText =
-        part.sourceType === 'gdrive' ? 'Drive → MP4' : `${part.blobFile} → MP4`;
 
       cell.innerHTML = `
         <div class="together-cell-head">
           <div class="together-cell-title">
             <span class="badge badge-parts">${this.escapeHtml(part.partLabel)}</span>
-            <strong>${this.escapeHtml(part.name)}</strong>
           </div>
-          <span class="together-blob-tag">${this.escapeHtml(tagText)}</span>
         </div>
         <div class="together-player-mount"></div>
       `;
@@ -1112,13 +828,14 @@ class CipherVaultApp {
       .slice(1)
       .some((p) => p.video.muted);
     this.syncUnmuteAllBtn.textContent = anySecondaryMuted
-      ? 'Audio: Part 1 Only (Tap to Unmute All)'
-      : 'Audio: All Parts Active (Tap for Part 1 Only)';
+      ? 'Audio: Part 1 Only'
+      : 'Audio: All Parts';
   }
 
   renderUpNext(currentItem) {
     this.upNextGrid.innerHTML = '';
     const others = this.session.catalog.filter((c) => c.id !== currentItem.id);
+    this.upNextGrid.parentElement.hidden = others.length === 0;
     for (const item of others) {
       this.upNextGrid.appendChild(this.createMediaCard(item));
     }
@@ -1145,31 +862,6 @@ class CipherVaultApp {
       p.destroy();
     }
     this.togetherPlayers = [];
-  }
-
-  renderInspectorModal() {
-    this.inspectorTableBody.innerHTML = '';
-    for (const item of this.session.catalog) {
-      for (const part of item.parts) {
-        const srcCell =
-          part.sourceType === 'gdrive'
-            ? `<code>Google Drive (${this.escapeHtml(part.driveFileId.slice(0, 12))}…)</code>`
-            : `<code>assets/videos/${this.escapeHtml(part.blobFile)}</code>`;
-
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${srcCell}</td>
-          <td><strong>${this.escapeHtml(part.name)}</strong></td>
-          <td>${
-            item.isGroup
-              ? `<span class="table-group-pill">${this.escapeHtml(item.title)} (${this.escapeHtml(part.partLabel)})</span>`
-              : `<span class="table-single-pill">Single</span>`
-          }</td>
-          <td>${formatTime(part.duration)} • ${formatBytes(part.size)}</td>
-        `;
-        this.inspectorTableBody.appendChild(tr);
-      }
-    }
   }
 
   escapeHtml(str) {

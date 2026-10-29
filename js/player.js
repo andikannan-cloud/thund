@@ -95,14 +95,13 @@ export class CipherPlayer {
           <span class="cp-mp4-dot"></span>
           <span class="cp-filename">—</span>
         </div>
-        <div class="cp-source-tag"></div>
       </div>
 
       <div class="cp-loader" hidden>
         <div class="cp-spinner"></div>
-        <div class="cp-loader-label">Decrypting stream...</div>
+        <div class="cp-loader-label">Loading...</div>
         <div class="cp-loader-bar"><span class="cp-loader-fill"></span></div>
-        <button type="button" class="cp-retry-btn" hidden>Retry Stream</button>
+        <button type="button" class="cp-retry-btn" hidden>Retry</button>
       </div>
 
       <div class="cp-seek-ripple cp-ripple-left" hidden>-5s</div>
@@ -153,7 +152,7 @@ export class CipherPlayer {
             </button>
             <button type="button" class="cp-btn cp-pill-btn cp-speed-btn" title="Playback Speed">1x</button>
             <button type="button" class="cp-btn cp-pip-btn" title="Picture-in-Picture">${ICONS.pip}</button>
-            <button type="button" class="cp-btn cp-dl-btn" title="Save restored .mp4">${ICONS.download}</button>
+            <button type="button" class="cp-btn cp-dl-btn" title="Download">${ICONS.download}</button>
             <button type="button" class="cp-btn cp-fs-btn" title="Fullscreen">${ICONS.fullscreen}</button>
           </div>
         </div>
@@ -164,7 +163,6 @@ export class CipherPlayer {
 
     this.video = this.root.querySelector('.cp-video');
     this.filenameEl = this.root.querySelector('.cp-filename');
-    this.sourceTagEl = this.root.querySelector('.cp-source-tag');
     this.loaderEl = this.root.querySelector('.cp-loader');
     this.loaderLabelEl = this.root.querySelector('.cp-loader-label');
     this.loaderFillEl = this.root.querySelector('.cp-loader-fill');
@@ -698,9 +696,9 @@ export class CipherPlayer {
     this._fallbackUrls = [];
     this._wantAutoPlay = Boolean(autoPlayNow);
 
-    this.filenameEl.textContent = part.name;
-    this.sourceTagEl.textContent =
-      part.sourceType === 'gdrive' ? 'Google Drive → MP4' : `${part.blobFile} → MP4`;
+    this.filenameEl.textContent = part.partLabel && part.partLabel !== 'Full Video'
+      ? `${part.partLabel}`
+      : part.name.replace(/\.mp4$/i, '');
     if (part.poster) {
       this.video.poster = part.poster;
     } else {
@@ -717,10 +715,7 @@ export class CipherPlayer {
     this.retryBtn.hidden = true;
     this.loaderEl.hidden = false;
     this.loaderFillEl.style.width = '5%';
-    this.loaderLabelEl.textContent =
-      part.sourceType === 'gdrive'
-        ? 'Connecting Google Drive stream...'
-        : `Decrypting ${part.blobFile}...`;
+    this.loaderLabelEl.textContent = 'Loading...';
 
     try {
       const resolved = await this.session.getPlayableMp4(part, (pct, msg) => {
