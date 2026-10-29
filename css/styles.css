@@ -1786,6 +1786,143 @@ code {
   font-size: 0.76rem;
 }
 
+/* Google Drive Connector UI */
+.drive-connect-btn {
+  height: 38px;
+  padding: 0 13px;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #7dd3fc;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.drive-connect-btn:hover {
+  background: rgba(56, 189, 248, 0.22);
+}
+
+.drive-connect-btn.is-connected {
+  background: rgba(52, 211, 153, 0.14);
+  border-color: rgba(52, 211, 153, 0.42);
+  color: #6ee7b7;
+}
+
+.gdrive-modal-panel {
+  max-width: 680px;
+  overflow-y: auto;
+}
+
+.gdrive-auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  padding: 4px;
+  background: rgba(7, 9, 15, 0.65);
+  border: 1px solid var(--border-subtle);
+  border-radius: 11px;
+}
+
+.gdrive-tab {
+  min-height: 38px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.gdrive-tab.is-active {
+  background: linear-gradient(135deg, #0ea5e9, #6366f1);
+  color: #fff;
+}
+
+.gdrive-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.gd-input,
+.gd-textarea {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(7, 9, 15, 0.85);
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  outline: none;
+}
+
+.gd-input:focus,
+.gd-textarea:focus {
+  border-color: var(--accent);
+}
+
+.gd-textarea {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  resize: vertical;
+}
+
+.gd-file-input {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.gd-keep-local {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.gd-status-banner {
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.gd-status-banner.is-success {
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  color: #a7f3d0;
+}
+
+.gd-status-banner.is-error {
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  color: #fca5a5;
+}
+
+.gd-actions-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.gd-submit-btn {
+  width: 100%;
+}
+
 /* ==========================================================================
    MOBILE / ANDROID RESPONSIVE ADAPTATIONS
    ========================================================================== */

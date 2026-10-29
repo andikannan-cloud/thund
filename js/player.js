@@ -312,9 +312,10 @@ export class CipherPlayer {
     });
 
     this.dlBtn.addEventListener('click', () => {
-      if (!this.currentUrl || !this.currentPart) return;
+      const dlHref = this.currentDownloadUrl || this.currentUrl;
+      if (!dlHref || !this.currentPart) return;
       const a = document.createElement('a');
-      a.href = this.currentUrl;
+      a.href = dlHref;
       a.download = this.currentPart.name;
       document.body.appendChild(a);
       a.click();
@@ -553,7 +554,8 @@ export class CipherPlayer {
     this._activeLoadToken = reqToken;
 
     this.filenameEl.textContent = part.name;
-    this.sourceTagEl.textContent = `${part.blobFile} → MP4`;
+    this.sourceTagEl.textContent =
+      part.sourceType === 'gdrive' ? 'Google Drive → MP4' : `${part.blobFile} → MP4`;
     if (part.poster) {
       this.video.poster = part.poster;
     } else {
@@ -568,10 +570,13 @@ export class CipherPlayer {
 
     this.loaderEl.hidden = false;
     this.loaderFillEl.style.width = '5%';
-    this.loaderLabelEl.textContent = `Decrypting ${part.blobFile}...`;
+    this.loaderLabelEl.textContent =
+      part.sourceType === 'gdrive'
+        ? 'Connecting Google Drive stream...'
+        : `Decrypting ${part.blobFile}...`;
 
     try {
-      const { url } = await this.session.getPlayableMp4(part, (pct, msg) => {
+      const { url, downloadUrl } = await this.session.getPlayableMp4(part, (pct, msg) => {
         if (this.destroyed || this._activeLoadToken !== reqToken) return;
         this.loaderFillEl.style.width = `${pct}%`;
         this.loaderLabelEl.textContent = `${msg} (${pct}%)`;
@@ -580,6 +585,7 @@ export class CipherPlayer {
       if (this.destroyed || this._activeLoadToken !== reqToken) return;
 
       this.currentUrl = url;
+      this.currentDownloadUrl = downloadUrl || url;
       this.video.src = url;
       this.applyNativeLoopFlag();
       this.video.playbackRate = SPEEDS[this.speedIndex];

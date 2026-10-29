@@ -1,12 +1,13 @@
 /**
- * CipherStream Vault Crypto Engine
- * - Unpacks opaque binary core.vlt
+ * CipherStream Vault Crypto Engine (js/crypto-engine.js)
+ * - Unpacks & packs opaque binary core.vlt
  * - Derives AES-256-GCM wrapping key via PBKDF2-SHA256 (310,000 iterations)
- * - Unwraps RSA-OAEP-2048 private key in RAM only
- * - Unseals per-video metadata + thumbnails + symmetric file keys
- * - Decrypts obfuscated random blobs back into playable video/mp4 Blobs in memory
+ * - Decrypts sealed Google Drive "videos" folder config (API Key or Service Account)
+ *   AND/OR local encrypted blobs in RAM only
  * - Groups multi-part videos (e.g. something_00.mp4, something_01.mp4) automatically
  */
+
+import { GoogleDriveClient } from './gdrive-engine.js';
 
 const MAGIC = [0x89, 0x56, 0x4c, 0x54]; // \x89VLT
 const MASK_LEN = 32;
@@ -18,11 +19,32 @@ export class InvalidPasskeyError extends Error {
   }
 }
 
+export function toBase64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) {
+    bin += String.fromCharCode(bytes[i]);
+  }
+  return btoa(bin);
+}
+
 export function fromBase64(b64) {
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) {
     out[i] = bin.charCodeAt(i);
+  }
+  return out;
+}
+
+export function packVaultBinary(vaultObj) {
+  const jsonBytes = new TextEncoder().encode(JSON.stringify(vaultObj));
+  const mask = window.crypto.getRandomValues(new Uint8Array(MASK_LEN));
+  const out = new Uint8Array(MAGIC.length + MASK_LEN + jsonBytes.length);
+  out.set(MAGIC, 0);
+  out.set(mask, MAGIC.length);
+  const offset = MAGIC.length + MASK_LEN;
+  for (let i = 0; i < jsonBytes.length; i++) {
+    out[offset + i] = jsonBytes[i] ^ mask[i % MASK_LEN];
   }
   return out;
 }
@@ -59,7 +81,7 @@ export async function fetchVaultManifest() {
   return unpackVaultBinary(buf);
 }
 
-async function deriveWrappingKey(passkey, saltBytes, iterations) {
+async function deriveWrappingKey(passkey, saltBytes, iterations, usages = ['decrypt']) {
   const subtle = window.crypto?.subtle;
   if (!subtle) {
     throw new Error(
@@ -83,7 +105,7 @@ async function deriveWrappingKey(passkey, saltBytes, iterations) {
     keyMaterial,
     { name: 'AES-GCM', length: 256 },
     false,
-    ['decrypt']
+    usages
   );
 }
 
@@ -100,13 +122,11 @@ export function prettifyTitle(rawStem) {
  *   something_00.mp4, something_01.mp4, something_02.mp4
  *   clip-1.mp4, clip-2.mp4
  *   series_part01.mp4, series_part02.mp4
- * Standalone files (or singletons where only 1 matching file exists) remain single videos.
  */
 export function groupMediaItems(rawItems) {
-  // Deduplicate exact same (folder + name) keeping the newest upload
   const dedupMap = new Map();
   for (const item of rawItems) {
-    const fullKey = `${item.folder || ''}/${item.name}`.toLowerCase();
+    const fullKey = `${item.sourceType || 'local'}::${item.folder || ''}/${item.name}`.toLowerCase();
     const prev = dedupMap.get(fullKey);
     if (!prev || (item.addedAt || 0) >= (prev.addedAt || 0)) {
       dedupMap.set(fullKey, item);
@@ -150,7 +170,6 @@ export function groupMediaItems(rawItems) {
 
   for (const [bucketKey, bucket] of candidateBuckets.entries()) {
     if (bucket.members.length >= 2) {
-      // Multi-part grouped video!
       bucket.members.sort((a, b) => {
         if (a.partNum !== b.partNum) return a.partNum - b.partNum;
         return a.item.name.localeCompare(b.item.name);
@@ -165,7 +184,6 @@ export function groupMediaItems(rawItems) {
         shortCode: `_${m.partDigits}`,
       }));
 
-      // Pick any valid poster template for the single group card
       const coverPart = parts.find((p) => p.poster) || parts[0];
       const totalDuration = parts.reduce((acc, p) => acc + (p.duration || 0), 0);
       const totalSize = parts.reduce((acc, p) => acc + (p.size || 0), 0);
@@ -174,6 +192,7 @@ export function groupMediaItems(rawItems) {
       catalog.push({
         id: `grp_${bucketKey.replace(/[^a-z0-9]+/gi, '_')}`,
         isGroup: true,
+        sourceType: coverPart.sourceType || 'local',
         title: prettifyTitle(bucket.baseRaw),
         rawBase: bucket.baseRaw,
         folder: bucket.folder,
@@ -188,7 +207,6 @@ export function groupMediaItems(rawItems) {
         parts,
       });
     } else {
-      // Only 1 file matched trailing number — treat as standalone single video
       const single = bucket.members[0];
       standaloneItems.push({ item: single.item, stem: single.stem });
     }
@@ -206,6 +224,7 @@ export function groupMediaItems(rawItems) {
     catalog.push({
       id: `vid_${item.id}`,
       isGroup: false,
+      sourceType: item.sourceType || 'local',
       title: prettifyTitle(stem),
       rawBase: stem,
       folder: item.folder || '',
@@ -221,7 +240,6 @@ export function groupMediaItems(rawItems) {
     });
   }
 
-  // Sort: multi-part groups first or alphabetical/recent cleanly (groups highlighted, then alphabetical)
   catalog.sort((a, b) => {
     if (a.isGroup !== b.isGroup) return a.isGroup ? -1 : 1;
     return a.title.localeCompare(b.title);
@@ -235,8 +253,19 @@ export class VaultSession {
     this.unlocked = false;
     this.catalog = [];
     this.rawEntriesCount = 0;
-    this.blobCache = new Map(); // blobFile -> { url, blob }
-    this.inflight = new Map(); // blobFile -> Promise
+    this.localItems = [];
+    this.driveItems = [];
+    this.driveConfig = null;
+    this.driveClient = null;
+    this.driveError = null;
+    this.activePasskey = null;
+
+    this.blobCache = new Map(); // cacheKey -> { url, downloadUrl, blob, isDirectStream }
+    this.inflight = new Map();
+  }
+
+  hasGoogleDrive() {
+    return Boolean(this.driveClient && this.driveConfig);
   }
 
   async unlock(vaultObj, passkey) {
@@ -248,7 +277,8 @@ export class VaultSession {
     const wrappingKey = await deriveWrappingKey(
       passkey,
       fromBase64(vaultObj.kdf.salt),
-      vaultObj.kdf.iter
+      vaultObj.kdf.iter,
+      ['decrypt']
     );
 
     let pkcs8Buf;
@@ -262,65 +292,180 @@ export class VaultSession {
       throw new InvalidPasskeyError();
     }
 
-    const privateKey = await subtle.importKey(
-      'pkcs8',
-      pkcs8Buf,
-      { name: 'RSA-OAEP', hash: 'SHA-256' },
-      false,
-      ['decrypt']
-    );
+    // 1. Check if Google Drive encrypted config is sealed inside core.vlt
+    this.driveConfig = null;
+    this.driveClient = null;
+    this.driveItems = [];
+    this.driveError = null;
 
-    const entries = vaultObj.entries || [];
-    const decryptedItems = await Promise.all(
-      entries.map(async (entry) => {
-        const entryKeyRaw = await subtle.decrypt(
-          { name: 'RSA-OAEP' },
-          privateKey,
-          fromBase64(entry.k)
-        );
-        const entryKey = await subtle.importKey(
-          'raw',
-          entryKeyRaw,
-          { name: 'AES-GCM' },
-          false,
-          ['decrypt']
-        );
-        const metaPlainBuf = await subtle.decrypt(
-          { name: 'AES-GCM', iv: fromBase64(entry.i) },
-          entryKey,
-          fromBase64(entry.m)
-        );
-        const meta = JSON.parse(new TextDecoder().decode(metaPlainBuf));
-        return {
-          ...meta,
-          blobFile: entry.b,
-        };
-      })
-    );
+    if (vaultObj.gdrive?.sealed && vaultObj.gdrive?.iv) {
+      const gdrivePlainBuf = await subtle.decrypt(
+        { name: 'AES-GCM', iv: fromBase64(vaultObj.gdrive.iv) },
+        wrappingKey,
+        fromBase64(vaultObj.gdrive.sealed)
+      );
+      this.driveConfig = JSON.parse(new TextDecoder().decode(gdrivePlainBuf));
+      this.driveClient = new GoogleDriveClient(this.driveConfig);
+      try {
+        this.driveItems = await this.driveClient.listVideos();
+      } catch (err) {
+        this.driveError = err.message || 'Failed to list Google Drive folder.';
+      }
+    }
 
-    this.rawEntriesCount = decryptedItems.length;
-    this.catalog = groupMediaItems(decryptedItems);
+    // 2. Decrypt local vault blobs unless Drive config disabled local blobs
+    this.localItems = [];
+    const includeLocal = !this.driveConfig || this.driveConfig.includeLocalVault !== false;
+
+    if (includeLocal && (vaultObj.entries || []).length > 0) {
+      const privateKey = await subtle.importKey(
+        'pkcs8',
+        pkcs8Buf,
+        { name: 'RSA-OAEP', hash: 'SHA-256' },
+        false,
+        ['decrypt']
+      );
+
+      this.localItems = await Promise.all(
+        vaultObj.entries.map(async (entry) => {
+          const entryKeyRaw = await subtle.decrypt(
+            { name: 'RSA-OAEP' },
+            privateKey,
+            fromBase64(entry.k)
+          );
+          const entryKey = await subtle.importKey(
+            'raw',
+            entryKeyRaw,
+            { name: 'AES-GCM' },
+            false,
+            ['decrypt']
+          );
+          const metaPlainBuf = await subtle.decrypt(
+            { name: 'AES-GCM', iv: fromBase64(entry.i) },
+            entryKey,
+            fromBase64(entry.m)
+          );
+          const meta = JSON.parse(new TextDecoder().decode(metaPlainBuf));
+          return {
+            ...meta,
+            sourceType: 'local',
+            blobFile: entry.b,
+          };
+        })
+      );
+    }
+
+    this.activePasskey = passkey;
+    this.rebuildCatalog();
     this.unlocked = true;
     return this.catalog;
   }
 
+  rebuildCatalog() {
+    const combined = [...this.driveItems, ...this.localItems];
+    this.rawEntriesCount = combined.length;
+    this.catalog = groupMediaItems(combined);
+  }
+
+  async refreshGoogleDrive() {
+    if (!this.driveClient) return this.catalog;
+    this.driveError = null;
+    this.driveItems = await this.driveClient.listVideos();
+    this.rebuildCatalog();
+    return this.catalog;
+  }
+
   /**
-   * Fetches the obfuscated file from ./assets/videos/<blobFile>,
-   * decrypts AES-256-GCM in RAM, and returns a playable video/mp4 ObjectURL.
+   * Connects a new Google Drive folder config live in the current browser session
+   * AND returns a newly encrypted `core.vlt` binary Uint8Array ready to upload to GitHub!
    */
-  async getPlayableMp4(part, onProgress) {
-    if (this.blobCache.has(part.blobFile)) {
-      onProgress?.(100, 'Ready');
-      return this.blobCache.get(part.blobFile);
+  async connectAndSealGoogleDrive(vaultObj, driveConfig) {
+    if (!this.unlocked || !this.activePasskey) {
+      throw new Error('Unlock the vault first before sealing Google Drive credentials.');
     }
 
-    if (this.inflight.has(part.blobFile)) {
-      const res = await this.inflight.get(part.blobFile);
+    // 1. Test live connection to Google Drive right now!
+    const testClient = new GoogleDriveClient(driveConfig);
+    const fetchedVideos = await testClient.listVideos();
+
+    // 2. Encrypt driveConfig under the current passkey inside a fresh core.vlt payload
+    const subtle = window.crypto.subtle;
+    const wrappingKey = await deriveWrappingKey(
+      this.activePasskey,
+      fromBase64(vaultObj.kdf.salt),
+      vaultObj.kdf.iter,
+      ['encrypt', 'decrypt']
+    );
+
+    const gdriveIv = window.crypto.getRandomValues(new Uint8Array(12));
+    const sealedDriveBuf = await subtle.encrypt(
+      { name: 'AES-GCM', iv: gdriveIv },
+      wrappingKey,
+      new TextEncoder().encode(JSON.stringify(driveConfig))
+    );
+
+    const updatedVault = {
+      ...vaultObj,
+      v: 2,
+      entries: driveConfig.includeLocalVault ? vaultObj.entries || [] : [],
+      gdrive: {
+        iv: toBase64(gdriveIv),
+        sealed: toBase64(new Uint8Array(sealedDriveBuf)),
+      },
+    };
+
+    const packedBytes = packVaultBinary(updatedVault);
+
+    // 3. Activate live in the current session immediately!
+    this.driveConfig = driveConfig;
+    this.driveClient = testClient;
+    this.driveItems = fetchedVideos;
+    this.driveError = null;
+    if (!driveConfig.includeLocalVault) {
+      this.localItems = [];
+    }
+    this.rebuildCatalog();
+
+    return {
+      packedBytes,
+      updatedVault,
+      videoCount: fetchedVideos.length,
+    };
+  }
+
+  async getPlayableMp4(part, onProgress) {
+    const cacheKey =
+      part.sourceType === 'gdrive' ? `gd:${part.driveFileId}` : `loc:${part.blobFile}`;
+
+    if (this.blobCache.has(cacheKey)) {
+      const cached = this.blobCache.get(cacheKey);
+      // If Service Worker stream, re-ensure SW has auth before returning
+      if (part.sourceType === 'gdrive' && cached.isDirectStream && this.driveClient) {
+        await this.driveClient.syncServiceWorker();
+      }
+      onProgress?.(100, 'Ready');
+      return cached;
+    }
+
+    if (this.inflight.has(cacheKey)) {
+      const res = await this.inflight.get(cacheKey);
       onProgress?.(100, 'Ready');
       return res;
     }
 
     const promise = (async () => {
+      if (part.sourceType === 'gdrive') {
+        if (!this.driveClient) {
+          throw new Error('Google Drive client is not initialized.');
+        }
+        const resolved = await this.driveClient.resolveStream(part, onProgress);
+        if (!resolved.isDirectStream) {
+          this.blobCache.set(cacheKey, resolved);
+        }
+        return resolved;
+      }
+
+      // Local encrypted blob decryption in RAM
       onProgress?.(4, 'Fetching encrypted blob...');
       const response = await fetch(`./assets/videos/${encodeURIComponent(part.blobFile)}`);
       if (!response.ok) {
@@ -378,31 +523,42 @@ export class VaultSession {
 
       const blob = new Blob([mp4Buffer], { type: 'video/mp4' });
       const url = URL.createObjectURL(blob);
-      const entry = { url, blob, size: mp4Buffer.byteLength };
-      this.blobCache.set(part.blobFile, entry);
+      const entry = { url, downloadUrl: url, blob, size: mp4Buffer.byteLength };
+      this.blobCache.set(cacheKey, entry);
       onProgress?.(100, 'MP4 Ready');
       return entry;
     })();
 
-    this.inflight.set(part.blobFile, promise);
+    this.inflight.set(cacheKey, promise);
     try {
       return await promise;
     } finally {
-      this.inflight.delete(part.blobFile);
+      this.inflight.delete(cacheKey);
     }
   }
 
   lock() {
-    for (const { url } of this.blobCache.values()) {
-      try {
-        URL.revokeObjectURL(url);
-      } catch {
-        // ignore
+    if (this.driveClient) {
+      this.driveClient.clearServiceWorkerAuth().catch(() => {});
+    }
+    for (const { url, isDirectStream } of this.blobCache.values()) {
+      if (!isDirectStream && url) {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // ignore
+        }
       }
     }
     this.blobCache.clear();
     this.inflight.clear();
     this.catalog = [];
+    this.localItems = [];
+    this.driveItems = [];
+    this.driveConfig = null;
+    this.driveClient = null;
+    this.driveError = null;
+    this.activePasskey = null;
     this.rawEntriesCount = 0;
     this.unlocked = false;
   }
