@@ -1,0 +1,55 @@
+name: Connect Google Drive (One-Time Permanent Setup)
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep_sample_videos:
+        description: 'Keep sample local videos alongside Google Drive?'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  seal-google-drive:
+    name: Seal Google Drive Config Permanently into Vault
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Seal Google Drive into assets/core.vlt
+        env:
+          GDRIVE_FOLDER: ${{ secrets.GDRIVE_FOLDER }}
+          GDRIVE_API_KEY: ${{ secrets.GDRIVE_API_KEY }}
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$GDRIVE_FOLDER" ]; then
+            echo "Error: Please add GDRIVE_FOLDER and GDRIVE_API_KEY in GitHub Settings -> Secrets and variables -> Actions first."
+            exit 1
+          fi
+          EXTRA_ARGS=""
+          if [ "${{ inputs.keep_sample_videos }}" = "true" ]; then
+            EXTRA_ARGS="--keep-local"
+          fi
+          node .github/scripts/setup-gdrive.mjs $EXTRA_ARGS
+
+      - name: Commit & push permanent assets/core.vlt
+        run: |
+          if [ -n "$(git status --porcelain assets/)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A assets/
+            git commit -m "chore(vault): bind encrypted Google Drive folder permanently [vault-sync]"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+            echo "Saved permanently! Anyone entering your passkey on the website will now see your Google Drive videos."
+          fi

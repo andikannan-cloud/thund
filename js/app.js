@@ -2,6 +2,8 @@ import {
   fetchVaultManifest,
   VaultSession,
   InvalidPasskeyError,
+  checkLocalWritableServer,
+  inferGitHubRepoFromLocation,
 } from './crypto-engine.js';
 import { extractDriveFolderId } from './gdrive-engine.js';
 import { CipherPlayer, formatTime, formatBytes } from './player.js';
@@ -12,6 +14,7 @@ class CipherVaultApp {
   constructor() {
     this.vaultManifest = null;
     this.session = new VaultSession();
+    this.localWritable = false;
 
     this.activeFilter = 'all'; // 'all' | 'groups' | 'singles'
     this.searchQuery = '';
@@ -119,21 +122,32 @@ class CipherVaultApp {
     this.gdSaFilePicker = document.getElementById('gdSaFilePicker');
     this.gdSaJsonInput = document.getElementById('gdSaJsonInput');
     this.gdKeepLocalChk = document.getElementById('gdKeepLocalChk');
+    this.gdGithubSaveBox = document.getElementById('gdGithubSaveBox');
+    this.gdGhRepoInput = document.getElementById('gdGhRepoInput');
+    this.gdGhBranchInput = document.getElementById('gdGhBranchInput');
+    this.gdGhTokenInput = document.getElementById('gdGhTokenInput');
     this.gdStatusBanner = document.getElementById('gdStatusBanner');
     this.gdSealBtn = document.getElementById('gdSealBtn');
     this.gdSealBtnText = document.getElementById('gdSealBtnText');
   }
 
   async boot() {
-    // Pre-register Service Worker early so Drive byte-range streaming is ready immediately
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
+    }
+
+    this.localWritable = await checkLocalWritableServer();
+    const inferredRepo = inferGitHubRepoFromLocation();
+    if (inferredRepo && this.gdGhRepoInput) {
+      this.gdGhRepoInput.value = inferredRepo;
     }
 
     try {
       this.vaultManifest = await fetchVaultManifest();
       const localCount = (this.vaultManifest.entries || []).length;
-      const hasDrive = Boolean(this.vaultManifest.gdrive?.sealed);
+      const hasDrive = Boolean(
+        this.vaultManifest.gdrive?.m || this.vaultManifest.gdrive?.sealed
+      );
 
       if (hasDrive && localCount === 0) {
         this.lockVaultStatus.textContent =
@@ -462,6 +476,9 @@ class CipherVaultApp {
 
   openGdriveModal() {
     this.gdStatusBanner.hidden = true;
+    // Show GitHub API direct-commit box ONLY when not running on a local writable workspace server
+    this.gdGithubSaveBox.hidden = this.localWritable;
+
     if (this.session.driveConfig) {
       const cfg = this.session.driveConfig;
       this.gdFolderInput.value = cfg.folderId || '';
@@ -527,43 +544,64 @@ class CipherVaultApp {
       };
     }
 
+    const ghRepo = this.gdGhRepoInput?.value.trim() || '';
+    const ghBranch = this.gdGhBranchInput?.value.trim() || 'main';
+    const ghToken = this.gdGhTokenInput?.value.trim() || '';
+
+    if (!this.localWritable && !ghToken) {
+      this.showGdStatus(
+        'Enter your GitHub Repo & One-Time Personal Access Token below so the website can commit <code>assets/core.vlt</code> directly to GitHub permanently for all users!',
+        true
+      );
+      return;
+    }
+
     this.gdSealBtn.disabled = true;
-    this.gdSealBtnText.textContent = 'Connecting to Google Drive...';
+    this.gdSealBtnText.textContent = 'Encrypting & Saving Permanently...';
     this.gdStatusBanner.hidden = true;
 
     try {
-      const { packedBytes, updatedVault, videoCount } =
-        await this.session.connectAndSealGoogleDrive(this.vaultManifest, driveConfig);
+      const { updatedVault, videoCount, savedWhere } =
+        await this.session.connectAndPersistGoogleDrive(
+          this.vaultManifest,
+          driveConfig,
+          {
+            localWritable: this.localWritable,
+            githubRepo: ghRepo,
+            githubBranch: ghBranch,
+            githubToken: ghToken,
+          }
+        );
 
       this.vaultManifest = updatedVault;
-
-      // Trigger automatic download of the newly sealed core.vlt file!
-      const blob = new Blob([packedBytes], { type: 'application/octet-stream' });
-      const dlUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = dlUrl;
-      a.download = 'core.vlt';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(dlUrl), 3000);
+      if (this.gdGhTokenInput) this.gdGhTokenInput.value = ''; // Wipe token from DOM immediately
 
       this.updateCounts();
       this.renderGallery();
 
-      this.showGdStatus(
-        `<strong>Connected! Found ${videoCount} video(s) in your Google Drive folder.</strong><br/>` +
-          `Your encrypted <code>core.vlt</code> just downloaded — replace <code>assets/core.vlt</code> in your GitHub repo with this file so every device loads your Drive automatically!`,
-        false
-      );
+      if (savedWhere === 'workspace') {
+        this.showGdStatus(
+          `<strong>Saved Permanently! (${videoCount} Google Drive videos found)</strong><br/>` +
+            `<code>assets/core.vlt</code> in this workspace is now permanently encrypted &amp; bound to your Google Drive folder! Once pushed to GitHub Pages, <strong>every user on any phone or PC who logs in with your passkey will see these videos forever</strong> — you never need to enter the key again.`,
+          false
+        );
+      } else if (savedWhere === 'github') {
+        this.showGdStatus(
+          `<strong>Committed Permanently to GitHub! (${videoCount} Google Drive videos found)</strong><br/>` +
+            `<code>assets/core.vlt</code> was pushed directly to <code>${this.escapeHtml(
+              ghRepo
+            )}</code>. Within ~30s of GitHub Pages deploying, <strong>every user anywhere who logs in with your passkey will see your Google Drive videos forever!</strong>`,
+          false
+        );
+      }
     } catch (err) {
       this.showGdStatus(
-        `Connection failed: ${this.escapeHtml(err.message || 'Check Folder permissions & key.')}`,
+        `Error: ${this.escapeHtml(err.message || 'Check Folder permissions & key.')}`,
         true
       );
     } finally {
       this.gdSealBtn.disabled = false;
-      this.gdSealBtnText.textContent = 'Test Live & Download Encrypted core.vlt';
+      this.gdSealBtnText.textContent = 'Save Permanently for All Users';
     }
   }
 

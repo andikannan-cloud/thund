@@ -1923,6 +1923,26 @@ code {
   width: 100%;
 }
 
+.gd-github-box {
+  padding: 13px 14px;
+  border-radius: 12px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.28);
+}
+
+.gd-github-title {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #c7d2fe;
+  margin-bottom: 10px;
+}
+
+.gd-github-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 10px;
+}
+
 /* ==========================================================================
    MOBILE / ANDROID RESPONSIVE ADAPTATIONS
    ========================================================================== */

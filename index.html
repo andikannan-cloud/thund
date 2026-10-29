@@ -351,7 +351,7 @@
         <div id="gdriveInstructionsSa" class="workflow-tip" hidden>
           <strong>100% Restricted Private Folder Setup:</strong><br/>
           1. In <code>console.cloud.google.com</code> → enable <strong>Google Drive API</strong> → <strong>Credentials → Create Credentials → Service Account</strong> → <strong>Keys → Add Key → Create new key (JSON)</strong>.<br/>
-          2. In Google Drive, keep your <code>videos</code> folder <strong>Restricted</strong> and share it only with that <code><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="2d0303036d030303444c40034a5e485f5b444e484c4e4e42584359034e4240">[email&#160;protected]</a></code> email (Viewer).
+          2. In Google Drive, keep your <code>videos</code> folder <strong>Restricted</strong> and share it only with that <code><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="ac828282ec828282c5cdc182cbdfc9dedac5cfc9cdcfcfc3d9c2d882cfc3c1">[email&#160;protected]</a></code> email (Viewer).
         </div>
 
         <label class="field-label">
@@ -395,11 +395,30 @@
           <span>Also keep existing local sample videos from <code>assets/videos/</code> (uncheck to show ONLY your Google Drive videos)</span>
         </label>
 
+        <!-- Shown ONLY on live GitHub Pages (when local workspace auto-save isn't present) -->
+        <div id="gdGithubSaveBox" class="gd-github-box" hidden>
+          <div class="gd-github-title">One-Time Permanent Save to GitHub Repo (So All Users See It Forever)</div>
+          <div class="gd-github-grid">
+            <label class="field-label">
+              <span>GitHub Repo (<code>owner/repo</code>)</span>
+              <input id="gdGhRepoInput" type="text" class="gd-input" placeholder="username/my-vault" />
+            </label>
+            <label class="field-label">
+              <span>Branch</span>
+              <input id="gdGhBranchInput" type="text" class="gd-input" value="main" />
+            </label>
+          </div>
+          <label class="field-label" style="margin-top:8px;">
+            <span>One-Time GitHub Personal Access Token (<code>Contents: Read &amp; Write</code> — never saved, used once to commit <code>assets/core.vlt</code>)</span>
+            <input id="gdGhTokenInput" type="password" class="gd-input" placeholder="github_pat_... or ghp_..." />
+          </label>
+        </div>
+
         <div id="gdStatusBanner" class="gd-status-banner" hidden></div>
 
         <div class="gd-actions-row">
           <button type="submit" id="gdSealBtn" class="unlock-btn gd-submit-btn">
-            <span id="gdSealBtnText">Test Live &amp; Download Encrypted core.vlt</span>
+            <span id="gdSealBtnText">Save Permanently for All Users</span>
           </button>
         </div>
       </form>
@@ -407,5 +426,5 @@
   </div>
 
   <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script type="module" src="./js/app.js"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a523819b7c5f21ba',t:'MTc5MzI5MDgxMg=='};var l=window.parent.location,o;try{o=new URL(l.origin).origin}catch(e){try{o=new URL(new URL(l.href).origin).origin}catch(e){o=''}}var u='/cdn-cgi/challenge-platform/scripts/jsd/main.js?ray=a523819b7c5f21ba',a=document.createElement('script');a.src=o?new URL(u,o).href:u;document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a5239c099bbe21ba',t:'MTc5MzI5MTg5NQ=='};var l=window.parent.location,o;try{o=new URL(l.origin).origin}catch(e){try{o=new URL(new URL(l.href).origin).origin}catch(e){o=''}}var u='/cdn-cgi/challenge-platform/scripts/jsd/main.js?ray=a5239c099bbe21ba',a=document.createElement('script');a.src=o?new URL(u,o).href:u;document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

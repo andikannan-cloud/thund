@@ -2,9 +2,9 @@
  * CipherStream Vault Crypto Engine (js/crypto-engine.js)
  * - Unpacks & packs opaque binary core.vlt
  * - Derives AES-256-GCM wrapping key via PBKDF2-SHA256 (310,000 iterations)
- * - Decrypts sealed Google Drive "videos" folder config (API Key or Service Account)
- *   AND/OR local encrypted blobs in RAM only
- * - Groups multi-part videos (e.g. something_00.mp4, something_01.mp4) automatically
+ * - Unwraps RSA-OAEP-2048 private key in RAM only
+ * - Unseals permanent Google Drive folder config AND/OR local encrypted blobs
+ * - Persists one-time setup directly to workspace disk or GitHub repository
  */
 
 import { GoogleDriveClient } from './gdrive-engine.js';
@@ -21,8 +21,9 @@ export class InvalidPasskeyError extends Error {
 
 export function toBase64(bytes) {
   let bin = '';
-  for (let i = 0; i < bytes.length; i++) {
-    bin += String.fromCharCode(bytes[i]);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
   return btoa(bin);
 }
@@ -81,6 +82,91 @@ export async function fetchVaultManifest() {
   return unpackVaultBinary(buf);
 }
 
+export async function checkLocalWritableServer() {
+  try {
+    const res = await fetch(`./__local_vault_status__?t=${Date.now()}`, {
+      cache: 'no-store',
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return Boolean(data?.writable);
+  } catch {
+    return false;
+  }
+}
+
+export function inferGitHubRepoFromLocation() {
+  const host = window.location.hostname || '';
+  if (!host.endsWith('.github.io')) return '';
+  const owner = host.slice(0, -'.github.io'.length);
+  const seg = (window.location.pathname || '/').split('/').filter(Boolean)[0];
+  if (seg) return `${owner}/${seg}`;
+  return `${owner}/${owner}.github.io`;
+}
+
+/**
+ * Commits the encrypted core.vlt directly into a GitHub repository via GitHub REST API
+ * so every user visiting GitHub Pages permanently gets the connected Google Drive vault!
+ */
+export async function commitVaultToGitHubRepo({
+  repoFullName,
+  branch = 'main',
+  token,
+  packedBytes,
+}) {
+  const cleanRepo = String(repoFullName || '').trim().replace(/^\/+|\/+$/g, '');
+  if (!cleanRepo.includes('/')) {
+    throw new Error('Enter GitHub repository as owner/repo-name.');
+  }
+  const apiUrl = `https://api.github.com/repos/${cleanRepo}/contents/assets/core.vlt`;
+  const authHeaders = {
+    Accept: 'application/vnd.github+json',
+    Authorization: `Bearer ${token.trim()}`,
+  };
+
+  // 1. Read existing file SHA if assets/core.vlt already exists on branch
+  let existingSha = undefined;
+  const getRes = await fetch(
+    `${apiUrl}?ref=${encodeURIComponent(branch)}`,
+    { headers: authHeaders }
+  );
+  if (getRes.ok) {
+    const meta = await getRes.json();
+    existingSha = meta.sha;
+  } else if (getRes.status !== 404) {
+    const errBody = await getRes.json().catch(() => ({}));
+    throw new Error(
+      errBody.message || `GitHub API read error (HTTP ${getRes.status}). Check token & repo name.`
+    );
+  }
+
+  // 2. Commit updated encrypted assets/core.vlt
+  const putBody = {
+    message: 'chore(vault): permanently seal encrypted Google Drive connector [vault-sync]',
+    content: toBase64(packedBytes),
+    branch,
+  };
+  if (existingSha) putBody.sha = existingSha;
+
+  const putRes = await fetch(apiUrl, {
+    method: 'PUT',
+    headers: {
+      ...authHeaders,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(putBody),
+  });
+
+  if (!putRes.ok) {
+    const errBody = await putRes.json().catch(() => ({}));
+    throw new Error(
+      errBody.message || `GitHub commit failed (HTTP ${putRes.status}). Ensure token has Contents: Read & Write permission.`
+    );
+  }
+
+  return await putRes.json();
+}
+
 async function deriveWrappingKey(passkey, saltBytes, iterations, usages = ['decrypt']) {
   const subtle = window.crypto?.subtle;
   if (!subtle) {
@@ -117,12 +203,6 @@ export function prettifyTitle(rawStem) {
     .replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
-/**
- * Groups items sharing naming patterns like:
- *   something_00.mp4, something_01.mp4, something_02.mp4
- *   clip-1.mp4, clip-2.mp4
- *   series_part01.mp4, series_part02.mp4
- */
 export function groupMediaItems(rawItems) {
   const dedupMap = new Map();
   for (const item of rawItems) {
@@ -258,9 +338,8 @@ export class VaultSession {
     this.driveConfig = null;
     this.driveClient = null;
     this.driveError = null;
-    this.activePasskey = null;
 
-    this.blobCache = new Map(); // cacheKey -> { url, downloadUrl, blob, isDirectStream }
+    this.blobCache = new Map();
     this.inflight = new Map();
   }
 
@@ -292,40 +371,66 @@ export class VaultSession {
       throw new InvalidPasskeyError();
     }
 
-    // 1. Check if Google Drive encrypted config is sealed inside core.vlt
+    const privateKey = await subtle.importKey(
+      'pkcs8',
+      pkcs8Buf,
+      { name: 'RSA-OAEP', hash: 'SHA-256' },
+      false,
+      ['decrypt']
+    );
+
+    // 1. Unseal permanent Google Drive config if present in core.vlt
     this.driveConfig = null;
     this.driveClient = null;
     this.driveItems = [];
     this.driveError = null;
 
-    if (vaultObj.gdrive?.sealed && vaultObj.gdrive?.iv) {
-      const gdrivePlainBuf = await subtle.decrypt(
-        { name: 'AES-GCM', iv: fromBase64(vaultObj.gdrive.iv) },
-        wrappingKey,
-        fromBase64(vaultObj.gdrive.sealed)
-      );
-      this.driveConfig = JSON.parse(new TextDecoder().decode(gdrivePlainBuf));
-      this.driveClient = new GoogleDriveClient(this.driveConfig);
-      try {
-        this.driveItems = await this.driveClient.listVideos();
-      } catch (err) {
-        this.driveError = err.message || 'Failed to list Google Drive folder.';
+    if (vaultObj.gdrive) {
+      let gdrivePlainBuf;
+      if (vaultObj.gdrive.k && vaultObj.gdrive.i && vaultObj.gdrive.m) {
+        // Hybrid RSA-OAEP + AES-256-GCM envelope
+        const gdKeyRaw = await subtle.decrypt(
+          { name: 'RSA-OAEP' },
+          privateKey,
+          fromBase64(vaultObj.gdrive.k)
+        );
+        const gdKey = await subtle.importKey(
+          'raw',
+          gdKeyRaw,
+          { name: 'AES-GCM' },
+          false,
+          ['decrypt']
+        );
+        gdrivePlainBuf = await subtle.decrypt(
+          { name: 'AES-GCM', iv: fromBase64(vaultObj.gdrive.i) },
+          gdKey,
+          fromBase64(vaultObj.gdrive.m)
+        );
+      } else if (vaultObj.gdrive.sealed && vaultObj.gdrive.iv) {
+        // Direct wrappingKey envelope fallback
+        gdrivePlainBuf = await subtle.decrypt(
+          { name: 'AES-GCM', iv: fromBase64(vaultObj.gdrive.iv) },
+          wrappingKey,
+          fromBase64(vaultObj.gdrive.sealed)
+        );
+      }
+
+      if (gdrivePlainBuf) {
+        this.driveConfig = JSON.parse(new TextDecoder().decode(gdrivePlainBuf));
+        this.driveClient = new GoogleDriveClient(this.driveConfig);
+        try {
+          this.driveItems = await this.driveClient.listVideos();
+        } catch (err) {
+          this.driveError = err.message || 'Failed to list Google Drive folder.';
+        }
       }
     }
 
-    // 2. Decrypt local vault blobs unless Drive config disabled local blobs
+    // 2. Decrypt local vault blobs unless Drive config replaced them
     this.localItems = [];
     const includeLocal = !this.driveConfig || this.driveConfig.includeLocalVault !== false;
 
     if (includeLocal && (vaultObj.entries || []).length > 0) {
-      const privateKey = await subtle.importKey(
-        'pkcs8',
-        pkcs8Buf,
-        { name: 'RSA-OAEP', hash: 'SHA-256' },
-        false,
-        ['decrypt']
-      );
-
       this.localItems = await Promise.all(
         vaultObj.entries.map(async (entry) => {
           const entryKeyRaw = await subtle.decrypt(
@@ -355,7 +460,6 @@ export class VaultSession {
       );
     }
 
-    this.activePasskey = passkey;
     this.rebuildCatalog();
     this.unlocked = true;
     return this.catalog;
@@ -376,47 +480,91 @@ export class VaultSession {
   }
 
   /**
-   * Connects a new Google Drive folder config live in the current browser session
-   * AND returns a newly encrypted `core.vlt` binary Uint8Array ready to upload to GitHub!
+   * Tests live Google Drive connection, seals it with RSA-OAEP(vaultObj.pub) + AES-256-GCM,
+   * AND saves it permanently (either directly to workspace assets/core.vlt or directly to GitHub repo!).
    */
-  async connectAndSealGoogleDrive(vaultObj, driveConfig) {
-    if (!this.unlocked || !this.activePasskey) {
-      throw new Error('Unlock the vault first before sealing Google Drive credentials.');
+  async connectAndPersistGoogleDrive(vaultObj, driveConfig, persistenceOpts = {}) {
+    if (!this.unlocked) {
+      throw new Error('Unlock the vault first.');
     }
 
-    // 1. Test live connection to Google Drive right now!
+    // 1. Verify Google Drive folder & API key / Service Account work right now
     const testClient = new GoogleDriveClient(driveConfig);
     const fetchedVideos = await testClient.listVideos();
 
-    // 2. Encrypt driveConfig under the current passkey inside a fresh core.vlt payload
+    // 2. Encrypt driveConfig using vault's RSA-OAEP public key + AES-256-GCM
     const subtle = window.crypto.subtle;
-    const wrappingKey = await deriveWrappingKey(
-      this.activePasskey,
-      fromBase64(vaultObj.kdf.salt),
-      vaultObj.kdf.iter,
-      ['encrypt', 'decrypt']
+    const publicKey = await subtle.importKey(
+      'spki',
+      fromBase64(vaultObj.pub),
+      { name: 'RSA-OAEP', hash: 'SHA-256' },
+      false,
+      ['encrypt']
     );
 
-    const gdriveIv = window.crypto.getRandomValues(new Uint8Array(12));
+    const gdKeyRaw = window.crypto.getRandomValues(new Uint8Array(32));
+    const gdIv = window.crypto.getRandomValues(new Uint8Array(12));
+    const gdKey = await subtle.importKey(
+      'raw',
+      gdKeyRaw,
+      { name: 'AES-GCM' },
+      false,
+      ['encrypt']
+    );
+
     const sealedDriveBuf = await subtle.encrypt(
-      { name: 'AES-GCM', iv: gdriveIv },
-      wrappingKey,
+      { name: 'AES-GCM', iv: gdIv },
+      gdKey,
       new TextEncoder().encode(JSON.stringify(driveConfig))
+    );
+
+    const wrappedGdKeyBuf = await subtle.encrypt(
+      { name: 'RSA-OAEP' },
+      publicKey,
+      gdKeyRaw
     );
 
     const updatedVault = {
       ...vaultObj,
-      v: 2,
+      v: 3,
       entries: driveConfig.includeLocalVault ? vaultObj.entries || [] : [],
       gdrive: {
-        iv: toBase64(gdriveIv),
-        sealed: toBase64(new Uint8Array(sealedDriveBuf)),
+        k: toBase64(new Uint8Array(wrappedGdKeyBuf)),
+        i: toBase64(gdIv),
+        m: toBase64(new Uint8Array(sealedDriveBuf)),
       },
     };
 
     const packedBytes = packVaultBinary(updatedVault);
+    let savedWhere = 'downloaded';
 
-    // 3. Activate live in the current session immediately!
+    // 3A. If local/preview writable server is active, write directly to assets/core.vlt on disk!
+    if (persistenceOpts.localWritable) {
+      const saveRes = await fetch('./__local_vault_save__', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          coreVltBase64: toBase64(packedBytes),
+          removeSampleBlobs: !driveConfig.includeLocalVault,
+        }),
+      });
+      const saveJson = await saveRes.json().catch(() => ({}));
+      if (!saveRes.ok || !saveJson.ok) {
+        throw new Error(saveJson.error || 'Failed to write assets/core.vlt on server.');
+      }
+      savedWhere = 'workspace';
+    } else if (persistenceOpts.githubToken && persistenceOpts.githubRepo) {
+      // 3B. On live GitHub Pages: commit directly to GitHub repo via GitHub REST API!
+      await commitVaultToGitHubRepo({
+        repoFullName: persistenceOpts.githubRepo,
+        branch: persistenceOpts.githubBranch || 'main',
+        token: persistenceOpts.githubToken,
+        packedBytes,
+      });
+      savedWhere = 'github';
+    }
+
+    // 4. Activate live in the current session immediately
     this.driveConfig = driveConfig;
     this.driveClient = testClient;
     this.driveItems = fetchedVideos;
@@ -430,6 +578,7 @@ export class VaultSession {
       packedBytes,
       updatedVault,
       videoCount: fetchedVideos.length,
+      savedWhere,
     };
   }
 
@@ -439,7 +588,6 @@ export class VaultSession {
 
     if (this.blobCache.has(cacheKey)) {
       const cached = this.blobCache.get(cacheKey);
-      // If Service Worker stream, re-ensure SW has auth before returning
       if (part.sourceType === 'gdrive' && cached.isDirectStream && this.driveClient) {
         await this.driveClient.syncServiceWorker();
       }
@@ -465,7 +613,6 @@ export class VaultSession {
         return resolved;
       }
 
-      // Local encrypted blob decryption in RAM
       onProgress?.(4, 'Fetching encrypted blob...');
       const response = await fetch(`./assets/videos/${encodeURIComponent(part.blobFile)}`);
       if (!response.ok) {
@@ -558,7 +705,6 @@ export class VaultSession {
     this.driveConfig = null;
     this.driveClient = null;
     this.driveError = null;
-    this.activePasskey = null;
     this.rawEntriesCount = 0;
     this.unlocked = false;
   }
