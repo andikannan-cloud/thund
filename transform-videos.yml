@@ -1,0 +1,63 @@
+name: Transform Videos to Encrypted Vault Format
+
+on:
+  push:
+    paths:
+      - 'assets/videos/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vault-transform-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  transform-videos:
+    name: Encrypt & Obfuscate Uploaded Videos
+    if: "!contains(github.event.head_commit.message, '[vault-sync]')"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Ensure FFmpeg is installed
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ffmpeg
+          fi
+          ffmpeg -version | head -n 1
+
+      - name: Pull latest branch head before encoding
+        if: github.event_name == 'push'
+        run: |
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+
+      - name: Convert raw videos into encrypted random blobs
+        run: |
+          node .github/scripts/encode-videos.mjs
+
+      - name: Commit & push transformed vault files
+        run: |
+          git status
+          if [ -n "$(git status --porcelain assets/)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A assets/
+            git commit -m "chore(vault): seal uploaded media blobs [vault-sync]"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+            echo "Transformed files committed and pushed successfully."
+          else
+            echo "No changes to commit."
+          fi
