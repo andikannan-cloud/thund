@@ -1427,6 +1427,33 @@ code {
   transition: width 0.15s ease;
 }
 
+.cp-loader.is-error .cp-spinner,
+.cp-loader.is-error .cp-loader-bar {
+  display: none;
+}
+
+.cp-loader.is-error .cp-loader-label {
+  color: #fca5a5;
+  max-width: 440px;
+  line-height: 1.45;
+}
+
+.cp-retry-btn {
+  margin-top: 6px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  background: rgba(56, 189, 248, 0.15);
+  color: #e0f2fe;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cp-retry-btn:hover {
+  background: rgba(56, 189, 248, 0.28);
+}
+
 /* Center Play Button */
 .cp-center-play {
   position: absolute;

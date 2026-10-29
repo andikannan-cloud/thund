@@ -4,9 +4,9 @@ import {
   InvalidPasskeyError,
   checkLocalWritableServer,
   inferGitHubRepoFromLocation,
-} from './crypto-engine.js';
-import { extractDriveFolderId } from './gdrive-engine.js';
-import { CipherPlayer, formatTime, formatBytes } from './player.js';
+} from './crypto-engine.js?v=2';
+import { extractDriveFolderId } from './gdrive-engine.js?v=2';
+import { CipherPlayer, formatTime, formatBytes } from './player.js?v=2';
 
 const SESSION_KEY = 'cv_session_passkey_v1';
 

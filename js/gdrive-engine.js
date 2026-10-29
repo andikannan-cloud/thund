@@ -4,24 +4,48 @@
  * Supports:
  *   1. API Key + Shared Folder Link ("Anyone with the link" — fastest 2-min setup)
  *   2. Service Account JSON + Private Restricted Folder (100% private folder)
- * Credentials are AES-256-GCM encrypted inside assets/core.vlt behind your passkey.
+ * Credentials are RSA-OAEP + AES-256-GCM encrypted inside assets/core.vlt behind your passkey.
  */
 
 const VIDEO_NAME_RE = /\.(mp4|m4v|mov|webm|mkv|avi|3gp|ts|mpeg|mpg|ogv)$/i;
+const REQUIRED_SW_VERSION = 2;
+
+let activeDriveClientInstance = null;
+let swAuthListenerBound = false;
+
+function ensureGlobalSwAuthResponder() {
+  if (swAuthListenerBound || !('serviceWorker' in navigator)) return;
+  swAuthListenerBound = true;
+
+  navigator.serviceWorker.addEventListener('message', async (event) => {
+    if (event.data?.type !== 'SW_NEED_DRIVE_AUTH') return;
+    const replyPort = event.ports?.[0];
+    if (!replyPort) return;
+
+    if (!activeDriveClientInstance) {
+      replyPort.postMessage({ auth: null });
+      return;
+    }
+
+    try {
+      const auth = await activeDriveClientInstance.ensureValidAuth();
+      replyPort.postMessage({ auth });
+    } catch {
+      replyPort.postMessage({ auth: null });
+    }
+  });
+}
 
 export function extractDriveFolderId(input) {
   const raw = String(input || '').trim();
   if (!raw) return '';
 
-  // Match /folders/<ID>
   const folderMatch = raw.match(/\/folders\/([a-zA-Z0-9_-]{10,})/);
   if (folderMatch) return folderMatch[1];
 
-  // Match ?id=<ID> or &id=<ID>
   const idParamMatch = raw.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
   if (idParamMatch) return idParamMatch[1];
 
-  // Raw ID directly
   if (/^[a-zA-Z0-9_-]{10,}$/.test(raw)) return raw;
 
   return '';
@@ -132,9 +156,11 @@ function sendSwMessage(sw, payload) {
 
 export class GoogleDriveClient {
   constructor(config) {
-    this.config = config; // { mode: 'apikey' | 'service_account', folderId, apiKey?, clientEmail?, privateKeyPem?, tokenUri?, includeLocalVault? }
+    this.config = config;
     this.tokenInfo = null;
     this.swReady = false;
+    activeDriveClientInstance = this;
+    ensureGlobalSwAuthResponder();
   }
 
   async ensureValidAuth() {
@@ -170,12 +196,20 @@ export class GoogleDriveClient {
     }
 
     try {
-      const reg = await navigator.serviceWorker.register('./sw.js', { scope: './' });
+      const reg = await navigator.serviceWorker.register('./sw.js?v=2', {
+        scope: './',
+        updateViaCache: 'none',
+      });
+      // Kick off update check in case an older sw.js v1 was previously installed
+      reg.update().catch(() => {});
       await navigator.serviceWorker.ready;
 
-      // Wait briefly if controller hasn't claimed on very first install
-      if (!navigator.serviceWorker.controller && reg.active) {
-        await new Promise((r) => setTimeout(r, 120));
+      // Wait briefly if newly installed v2 worker is claiming the client
+      if (
+        !navigator.serviceWorker.controller ||
+        !navigator.serviceWorker.controller.scriptURL.includes('v=2')
+      ) {
+        await new Promise((r) => setTimeout(r, 180));
       }
 
       const targetSw = navigator.serviceWorker.controller || reg.active;
@@ -186,7 +220,11 @@ export class GoogleDriveClient {
 
       const auth = await this.ensureValidAuth();
       const ack = await sendSwMessage(targetSw, { type: 'SET_DRIVE_AUTH', auth });
-      this.swReady = Boolean(ack.ok && navigator.serviceWorker.controller);
+      this.swReady = Boolean(
+        ack.ok &&
+          Number(ack.swVersion || 0) >= REQUIRED_SW_VERSION &&
+          navigator.serviceWorker.controller
+      );
       return this.swReady;
     } catch {
       this.swReady = false;
@@ -195,6 +233,9 @@ export class GoogleDriveClient {
   }
 
   async clearServiceWorkerAuth() {
+    if (activeDriveClientInstance === this) {
+      activeDriveClientInstance = null;
+    }
     if (!('serviceWorker' in navigator)) return;
     try {
       const sw = navigator.serviceWorker.controller;
@@ -204,6 +245,14 @@ export class GoogleDriveClient {
     } catch {
       // ignore
     }
+  }
+
+  buildDirectDriveMediaUrl(fileId, apiKey) {
+    return `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
+      fileId
+    )}?alt=media&acknowledgeAbuse=true&supportsAllDrives=true&key=${encodeURIComponent(
+      apiKey
+    )}`;
   }
 
   async fetchFolderChildren(folderId) {
@@ -257,6 +306,7 @@ export class GoogleDriveClient {
    * (plus up to 2 levels of subfolders automatically).
    */
   async listVideos() {
+    activeDriveClientInstance = this;
     await this.syncServiceWorker();
     const rootId = extractDriveFolderId(this.config.folderId);
     if (!rootId) {
@@ -301,6 +351,7 @@ export class GoogleDriveClient {
           id: `gd_${f.id}`,
           sourceType: 'gdrive',
           driveFileId: f.id,
+          mimeType: f.mimeType || 'video/mp4',
           blobFile: `gdrive://${f.id.slice(0, 12)}…`,
           name: cleanMp4Name,
           rawDriveName: f.name,
@@ -326,55 +377,104 @@ export class GoogleDriveClient {
   }
 
   /**
-   * Returns a playable stream URL (and optional download URL) for CipherPlayer.
-   * Uses the local Service Worker HTTP 206 byte-range stream when active (instant start for any file size!),
-   * with automatic direct/fetch fallback if Service Workers are disabled.
+   * Returns a primary playable stream URL PLUS automatic fallback candidates
+   * so videos never get stuck buffering on any browser/device.
    */
   async resolveStream(part, onProgress) {
+    activeDriveClientInstance = this;
     const auth = await this.ensureValidAuth();
     const swActive = await this.syncServiceWorker();
 
+    const candidateUrls = [];
+    let downloadUrl = '';
+
     if (swActive && navigator.serviceWorker?.controller) {
-      onProgress?.(100, 'Streaming from Google Drive');
-      const safeName = encodeURIComponent(part.name || `${part.driveFileId}.mp4`);
-      const streamUrl = `./__gdrive_stream__/${encodeURIComponent(
+      const safeName = encodeURIComponent(part.rawDriveName || part.name || `${part.driveFileId}.mp4`);
+      const qs = new URLSearchParams();
+      if (part.size > 0) qs.set('sz', String(part.size));
+      if (part.mimeType) qs.set('mt', part.mimeType);
+      const swUrl = `./__gdrive_stream__/${encodeURIComponent(
         part.driveFileId
-      )}/${safeName}`;
+      )}/${safeName}${qs.toString() ? `?${qs.toString()}` : ''}`;
+
+      candidateUrls.push(swUrl);
+      const dlQs = new URLSearchParams(qs);
+      dlQs.set('dl', '1');
+      downloadUrl = `./__gdrive_stream__/${encodeURIComponent(
+        part.driveFileId
+      )}/${safeName}?${dlQs.toString()}`;
+    }
+
+    if (auth.mode === 'apikey' && auth.apiKey) {
+      const directUrl = this.buildDirectDriveMediaUrl(part.driveFileId, auth.apiKey);
+      candidateUrls.push(directUrl);
+      if (!downloadUrl) downloadUrl = directUrl;
+    }
+
+    if (candidateUrls.length > 0) {
+      onProgress?.(100, 'Streaming from Google Drive');
       return {
-        url: streamUrl,
-        downloadUrl: `${streamUrl}?dl=1`,
+        url: candidateUrls[0],
+        fallbackUrls: candidateUrls.slice(1),
+        downloadUrl,
         isDirectStream: true,
       };
     }
 
-    // Fallback 1: API Key direct range-capable Google Drive media URL
+    // Service Account mode when Service Workers are completely disabled -> fetch into Blob
+    return this.fetchBlobOrDiagnose(part, onProgress);
+  }
+
+  /**
+   * Fallback 3 / Diagnostic fetcher:
+   * Fetches directly via Fetch API (streaming progress into a local Blob for <video>)
+   * OR extracts Google Drive's exact JSON error message (e.g. quota, sharing, API key referrer)
+   * if Google Drive rejected the media download.
+   */
+  async fetchBlobOrDiagnose(part, onProgress) {
+    const auth = await this.ensureValidAuth();
+    let mediaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
+      part.driveFileId
+    )}?alt=media&acknowledgeAbuse=true&supportsAllDrives=true`;
+
+    const headers = {};
     if (auth.mode === 'apikey') {
-      onProgress?.(100, 'Streaming from Google Drive');
-      const directUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
-        part.driveFileId
-      )}?alt=media&acknowledgeAbuse=true&supportsAllDrives=true&key=${encodeURIComponent(
-        auth.apiKey
-      )}`;
-      return {
-        url: directUrl,
-        downloadUrl: directUrl,
-        isDirectStream: true,
-      };
+      mediaUrl += `&key=${encodeURIComponent(auth.apiKey)}`;
+    } else {
+      headers.Authorization = `Bearer ${auth.accessToken}`;
     }
 
-    // Fallback 2: Service Account without Service Worker -> fetch with Bearer token into Blob
-    onProgress?.(6, 'Streaming from Google Drive...');
-    const res = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
-        part.driveFileId
-      )}?alt=media&acknowledgeAbuse=true&supportsAllDrives=true`,
-      {
-        headers: { Authorization: `Bearer ${auth.accessToken}` },
+    // If file is very large (> 180 MB), probe first 1 KB with Range to catch any 403/404 JSON error cleanly
+    // without downloading 500 MB into RAM.
+    const LARGE_LIMIT = 180 * 1024 * 1024;
+    if (part.size > LARGE_LIMIT) {
+      const probeRes = await fetch(mediaUrl, {
+        headers: { ...headers, Range: 'bytes=0-1023' },
         credentials: 'omit',
+      });
+      if (!probeRes.ok && probeRes.status !== 206) {
+        const errBody = await probeRes.json().catch(() => ({}));
+        const reason = errBody?.error?.errors?.[0]?.reason || '';
+        const msg =
+          errBody?.error?.message || `Google Drive HTTP ${probeRes.status}`;
+        throw new Error(reason ? `${msg} (${reason})` : msg);
       }
-    );
+      throw new Error(
+        'Browser could not decode this video stream directly (check that video codec is H.264 MP4 rather than HEVC/MKV).'
+      );
+    }
+
+    onProgress?.(6, 'Buffering video from Google Drive');
+    const res = await fetch(mediaUrl, {
+      headers,
+      credentials: 'omit',
+    });
+
     if (!res.ok) {
-      throw new Error(`Drive stream failed (HTTP ${res.status})`);
+      const errBody = await res.json().catch(() => ({}));
+      const reason = errBody?.error?.errors?.[0]?.reason || '';
+      const msg = errBody?.error?.message || `Google Drive stream failed (HTTP ${res.status})`;
+      throw new Error(reason ? `${msg} (${reason})` : msg);
     }
 
     const total = Number(res.headers.get('content-length')) || part.size || 0;
@@ -389,8 +489,8 @@ export class GoogleDriveClient {
         chunks.push(value);
         loaded += value.byteLength;
         onProgress?.(
-          Math.min(96, Math.round((loaded / total) * 90) + 6),
-          'Buffering from Google Drive...'
+          Math.min(97, Math.round((loaded / total) * 90) + 6),
+          'Buffering video'
         );
       }
       bytes = new Uint8Array(loaded);
@@ -403,11 +503,14 @@ export class GoogleDriveClient {
       bytes = new Uint8Array(await res.arrayBuffer());
     }
 
-    const blob = new Blob([bytes], { type: 'video/mp4' });
+    const mime =
+      part.mimeType && part.mimeType.startsWith('video/') ? part.mimeType : 'video/mp4';
+    const blob = new Blob([bytes], { type: mime });
     const blobUrl = URL.createObjectURL(blob);
-    onProgress?.(100, 'MP4 Ready');
+    onProgress?.(100, 'Ready');
     return {
       url: blobUrl,
+      fallbackUrls: [],
       downloadUrl: blobUrl,
       blob,
       isDirectStream: false,

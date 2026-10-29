@@ -102,6 +102,7 @@ export class CipherPlayer {
         <div class="cp-spinner"></div>
         <div class="cp-loader-label">Decrypting stream...</div>
         <div class="cp-loader-bar"><span class="cp-loader-fill"></span></div>
+        <button type="button" class="cp-retry-btn" hidden>Retry Stream</button>
       </div>
 
       <div class="cp-seek-ripple cp-ripple-left" hidden>-5s</div>
@@ -167,6 +168,7 @@ export class CipherPlayer {
     this.loaderEl = this.root.querySelector('.cp-loader');
     this.loaderLabelEl = this.root.querySelector('.cp-loader-label');
     this.loaderFillEl = this.root.querySelector('.cp-loader-fill');
+    this.retryBtn = this.root.querySelector('.cp-retry-btn');
     this.centerPlayBtn = this.root.querySelector('.cp-center-play');
     this.rippleLeft = this.root.querySelector('.cp-ripple-left');
     this.rippleRight = this.root.querySelector('.cp-ripple-right');
@@ -263,6 +265,13 @@ export class CipherPlayer {
     this.centerPlayBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this.togglePlay();
+    });
+
+    this.retryBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this.currentPart) {
+        this.loadPart(this.currentPart, true);
+      }
     });
 
     this.playBtn.addEventListener('click', () => this.togglePlay());
@@ -406,6 +415,9 @@ export class CipherPlayer {
       this.root.classList.add('state-paused');
       this.playBtn.innerHTML = ICONS.play;
       this.centerPlayBtn.innerHTML = ICONS.play;
+      if (!this._hasFatalError && !this._isFailingOver && this.video.readyState >= 2) {
+        this.loaderEl.hidden = true;
+      }
       this.showControls(true);
       this.onStateChange?.();
     });
@@ -417,7 +429,16 @@ export class CipherPlayer {
       this.applyNativeLoopFlag();
     });
 
+    this.video.addEventListener('loadeddata', () => {
+      if (!this._hasFatalError && !this._isFailingOver) {
+        this.loaderEl.hidden = true;
+      }
+    });
+
     this.video.addEventListener('timeupdate', () => {
+      if (!this._hasFatalError && !this._isFailingOver && !this.video.paused && this.video.readyState >= 2) {
+        this.loaderEl.hidden = true;
+      }
       if (this.isScrubbing) return;
       const cur = this.video.currentTime || 0;
       const dur = this.video.duration || this.currentPart?.duration || 0;
@@ -433,16 +454,33 @@ export class CipherPlayer {
     });
 
     this.video.addEventListener('waiting', () => {
+      if (this._hasFatalError || this.video.paused) return;
+      this.loaderEl.classList.remove('is-error');
+      this.retryBtn.hidden = true;
       this.loaderEl.hidden = false;
       this.loaderLabelEl.textContent = 'Buffering...';
     });
 
     this.video.addEventListener('playing', () => {
-      this.loaderEl.hidden = true;
+      if (!this._hasFatalError) {
+        this.loaderEl.hidden = true;
+      }
     });
 
     this.video.addEventListener('canplay', () => {
-      this.loaderEl.hidden = true;
+      if (!this._hasFatalError) {
+        this.loaderEl.hidden = true;
+      }
+    });
+
+    this.video.addEventListener('canplaythrough', () => {
+      if (!this._hasFatalError) {
+        this.loaderEl.hidden = true;
+      }
+    });
+
+    this.video.addEventListener('error', () => {
+      this.handleMediaError();
     });
 
     this.video.addEventListener('ended', () => {
@@ -548,10 +586,117 @@ export class CipherPlayer {
     this.onStateChange?.();
   }
 
+  showStreamError(message) {
+    this._hasFatalError = true;
+    this._isFailingOver = false;
+    this.loaderEl.classList.add('is-error');
+    this.loaderEl.hidden = false;
+    this.loaderLabelEl.textContent = message;
+    this.retryBtn.hidden = false;
+    this.showControls(true);
+  }
+
+  async handleMediaError() {
+    if (this.destroyed || !this.currentPart || this._isFailingOver) return;
+    const reqToken = this._activeLoadToken;
+
+    // Stage 2: Try remaining direct stream fallback URLs (e.g. direct Google Drive media URL)
+    if (this._fallbackUrls && this._fallbackUrls.length > 0) {
+      this._isFailingOver = true;
+      const nextUrl = this._fallbackUrls.shift();
+      this.loaderEl.classList.remove('is-error');
+      this.retryBtn.hidden = true;
+      this.loaderEl.hidden = false;
+      this.loaderLabelEl.textContent = 'Switching to direct Google Drive stream...';
+      this.loaderFillEl.style.width = '65%';
+
+      this.currentUrl = nextUrl;
+      this.video.src = nextUrl;
+      this.applyNativeLoopFlag();
+      this.video.playbackRate = SPEEDS[this.speedIndex];
+      this._isFailingOver = false;
+
+      if (this._wantAutoPlay) {
+        try {
+          await this.video.play();
+        } catch (err) {
+          if (err?.name === 'NotAllowedError') {
+            this.loaderEl.hidden = true;
+            this.showControls(true);
+          }
+        }
+      }
+      return;
+    }
+
+    // Stage 3: For Google Drive videos, fetch directly into Blob OR extract exact Google JSON error
+    if (
+      this.currentPart.sourceType === 'gdrive' &&
+      !this._triedBlobFallback &&
+      typeof this.session?.getDriveBlobFallback === 'function'
+    ) {
+      this._triedBlobFallback = true;
+      this._isFailingOver = true;
+      this.loaderEl.classList.remove('is-error');
+      this.retryBtn.hidden = true;
+      this.loaderEl.hidden = false;
+      this.loaderFillEl.style.width = '10%';
+      this.loaderLabelEl.textContent = 'Buffering directly from Google Drive...';
+
+      try {
+        const blobRes = await this.session.getDriveBlobFallback(
+          this.currentPart,
+          (pct, msg) => {
+            if (this.destroyed || this._activeLoadToken !== reqToken) return;
+            this.loaderFillEl.style.width = `${pct}%`;
+            this.loaderLabelEl.textContent = `${msg} (${pct}%)`;
+          }
+        );
+
+        if (this.destroyed || this._activeLoadToken !== reqToken) return;
+        this._isFailingOver = false;
+        this.currentUrl = blobRes.url;
+        this.currentDownloadUrl = blobRes.downloadUrl || blobRes.url;
+        this.video.src = blobRes.url;
+        this.applyNativeLoopFlag();
+        this.video.playbackRate = SPEEDS[this.speedIndex];
+        this.loaderEl.hidden = true;
+
+        if (this._wantAutoPlay) {
+          try {
+            await this.video.play();
+          } catch (err) {
+            if (err?.name === 'NotAllowedError') {
+              this.loaderEl.hidden = true;
+              this.showControls(true);
+            }
+          }
+        }
+        return;
+      } catch (err) {
+        if (this.destroyed || this._activeLoadToken !== reqToken) return;
+        this.showStreamError(`Google Drive stream blocked: ${err.message}`);
+        return;
+      }
+    }
+
+    const code = this.video.error?.code;
+    const hint =
+      code === 4 || code === 3
+        ? 'Browser cannot decode this video format/codec (use H.264 MP4 or click Download below).'
+        : 'Stream connection interrupted. Tap Retry Stream.';
+    this.showStreamError(hint);
+  }
+
   async loadPart(part, autoPlayNow = this.autoplay) {
     this.currentPart = part;
     const reqToken = Symbol('loadPart');
     this._activeLoadToken = reqToken;
+    this._hasFatalError = false;
+    this._isFailingOver = false;
+    this._triedBlobFallback = false;
+    this._fallbackUrls = [];
+    this._wantAutoPlay = Boolean(autoPlayNow);
 
     this.filenameEl.textContent = part.name;
     this.sourceTagEl.textContent =
@@ -568,6 +713,8 @@ export class CipherPlayer {
     this.curTimeEl.textContent = '0:00';
     this.durTimeEl.textContent = formatTime(part.duration || 0);
 
+    this.loaderEl.classList.remove('is-error');
+    this.retryBtn.hidden = true;
     this.loaderEl.hidden = false;
     this.loaderFillEl.style.width = '5%';
     this.loaderLabelEl.textContent =
@@ -576,7 +723,7 @@ export class CipherPlayer {
         : `Decrypting ${part.blobFile}...`;
 
     try {
-      const { url, downloadUrl } = await this.session.getPlayableMp4(part, (pct, msg) => {
+      const resolved = await this.session.getPlayableMp4(part, (pct, msg) => {
         if (this.destroyed || this._activeLoadToken !== reqToken) return;
         this.loaderFillEl.style.width = `${pct}%`;
         this.loaderLabelEl.textContent = `${msg} (${pct}%)`;
@@ -584,9 +731,13 @@ export class CipherPlayer {
 
       if (this.destroyed || this._activeLoadToken !== reqToken) return;
 
-      this.currentUrl = url;
-      this.currentDownloadUrl = downloadUrl || url;
-      this.video.src = url;
+      this.currentUrl = resolved.url;
+      this.currentDownloadUrl = resolved.downloadUrl || resolved.url;
+      this._fallbackUrls = Array.isArray(resolved.fallbackUrls)
+        ? [...resolved.fallbackUrls]
+        : [];
+
+      this.video.src = resolved.url;
       this.applyNativeLoopFlag();
       this.video.playbackRate = SPEEDS[this.speedIndex];
       this.loaderEl.hidden = true;
@@ -594,15 +745,18 @@ export class CipherPlayer {
       if (autoPlayNow) {
         try {
           await this.video.play();
-        } catch {
-          // If autoplay with audio is blocked by mobile policy on initial gesture mismatch, stay ready
-          this.showControls(true);
+        } catch (err) {
+          if (this.destroyed || this._activeLoadToken !== reqToken) return;
+          // Only handle autoplay-policy blocks here; actual media source errors trigger handleMediaError()
+          if (err?.name === 'NotAllowedError') {
+            this.loaderEl.hidden = true;
+            this.showControls(true);
+          }
         }
       }
     } catch (err) {
       if (this.destroyed || this._activeLoadToken !== reqToken) return;
-      this.loaderLabelEl.textContent = `Decryption error: ${err.message}`;
-      this.loaderFillEl.style.width = '100%';
+      this.showStreamError(`Stream error: ${err.message}`);
     }
   }
 
